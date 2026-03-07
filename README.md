@@ -40,6 +40,7 @@ A Python implementation of the [OpenAI Symphony](https://github.com/openai/symph
 - [Writing good tickets for agents](#writing-good-tickets-for-agents)
 - [Getting the most out of Stokowski](#getting-the-most-out-of-stokowski)
 - [Architecture](#architecture)
+- [Upgrading](#upgrading)
 - [Security](#security)
 - [License](#license)
 - [Credits](#credits)
@@ -671,6 +672,34 @@ WORKFLOW.md
 | `stokowski/workspace.py` | Per-issue workspace lifecycle and hooks |
 | `stokowski/web.py` | Optional FastAPI dashboard |
 | `stokowski/main.py` | CLI entry point, keyboard handler |
+
+---
+
+## Upgrading
+
+Your personal config lives in `WORKFLOW.md` and `.env` — both gitignored, so pulling the latest Stokowski changes will never touch them.
+
+```bash
+cd stokowski
+
+# Pull latest changes
+git pull origin main
+
+# Re-install the package (picks up any new dependencies)
+source .venv/bin/activate
+pip install -e ".[web]"
+
+# Verify everything still works
+stokowski --dry-run
+```
+
+That's it. Your `WORKFLOW.md`, `.env`, and any workspace directories are untouched.
+
+**After upgrading, check if `WORKFLOW.example.md` has changed** — new config fields or options may have been added that you'll want to adopt:
+
+```bash
+git diff HEAD@{1} WORKFLOW.example.md
+```
 
 ---
 
