@@ -1,0 +1,17 @@
+[project]
+name = "stokowski"
+version = "0.1.0"
+description = "Orchestrate Claude Code agents driven by Linear issues"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+web = ["fastapi>=0.115", "uvicorn>=0.32"]
+
+[project.scripts]
+stokowski = "stokowski.main:cli"
