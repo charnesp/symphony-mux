@@ -342,6 +342,9 @@ class Orchestrator:
         if not template_str:
             return f"You are working on an issue from Linear: {issue.identifier} - {issue.title}"
 
+        last_completed = self._last_completed_at.get(issue.id)
+        last_run_at = last_completed.isoformat() if last_completed else ""
+
         try:
             template = self._jinja.from_string(template_str)
             return template.render(
@@ -363,6 +366,7 @@ class Orchestrator:
                     "updated_at": str(issue.updated_at) if issue.updated_at else "",
                 },
                 attempt=attempt_num,
+                last_run_at=last_run_at,
             )
         except TemplateSyntaxError as e:
             raise RuntimeError(f"Template syntax error: {e}")
