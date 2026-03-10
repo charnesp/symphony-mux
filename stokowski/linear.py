@@ -88,6 +88,57 @@ query($projectSlug: String!, $states: [String!]!, $after: String) {
 }
 """
 
+COMMENT_CREATE_MUTATION = """
+mutation($issueId: String!, $body: String!) {
+  commentCreate(input: { issueId: $issueId, body: $body }) {
+    success
+    comment { id }
+  }
+}
+"""
+
+COMMENTS_QUERY = """
+query($issueId: String!) {
+  issue(id: $issueId) {
+    comments(orderBy: createdAt) {
+      nodes {
+        id
+        body
+        createdAt
+      }
+    }
+  }
+}
+"""
+
+ISSUE_UPDATE_MUTATION = """
+mutation($issueId: String!, $stateId: String!) {
+  issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+    success
+    issue { id state { name } }
+  }
+}
+"""
+
+WORKFLOW_STATES_QUERY = """
+query($teamId: String!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } } }) {
+    nodes {
+      id
+      name
+    }
+  }
+}
+"""
+
+ISSUE_TEAM_QUERY = """
+query($issueId: String!) {
+  issue(id: $issueId) {
+    team { id }
+  }
+}
+"""
+
 
 def _parse_datetime(val: str | None) -> datetime | None:
     if not val:
@@ -249,3 +300,67 @@ class LinearClient:
                 break
 
         return issues
+
+    async def post_comment(self, issue_id: str, body: str) -> bool:
+        """Post a comment on a Linear issue. Returns True on success."""
+        try:
+            data = await self._graphql(
+                COMMENT_CREATE_MUTATION,
+                {"issueId": issue_id, "body": body},
+            )
+            return data.get("commentCreate", {}).get("success", False)
+        except Exception as e:
+            logger.error(f"Failed to post comment on {issue_id}: {e}")
+            return False
+
+    async def fetch_comments(self, issue_id: str) -> list[dict]:
+        """Fetch all comments on a Linear issue. Returns list of {id, body, createdAt}."""
+        try:
+            data = await self._graphql(COMMENTS_QUERY, {"issueId": issue_id})
+            issue = data.get("issue", {})
+            return issue.get("comments", {}).get("nodes", [])
+        except Exception as e:
+            logger.error(f"Failed to fetch comments for {issue_id}: {e}")
+            return []
+
+    async def update_issue_state(self, issue_id: str, state_name: str) -> bool:
+        """Move an issue to a new state by name. Returns True on success."""
+        try:
+            # Get team ID from issue
+            issue_data = await self._graphql(ISSUE_TEAM_QUERY, {"issueId": issue_id})
+            team_id = issue_data.get("issue", {}).get("team", {}).get("id")
+            if not team_id:
+                logger.error(f"Could not find team for issue {issue_id}")
+                return False
+
+            # Get workflow states for the team
+            states_data = await self._graphql(
+                WORKFLOW_STATES_QUERY, {"teamId": team_id}
+            )
+            states = states_data.get("workflowStates", {}).get("nodes", [])
+
+            state_id = None
+            for s in states:
+                if s.get("name", "").strip().lower() == state_name.strip().lower():
+                    state_id = s["id"]
+                    break
+
+            if not state_id:
+                logger.error(
+                    f"State '{state_name}' not found for team {team_id}. "
+                    f"Available: {[s.get('name') for s in states]}"
+                )
+                return False
+
+            # Update the issue
+            data = await self._graphql(
+                ISSUE_UPDATE_MUTATION,
+                {"issueId": issue_id, "stateId": state_id},
+            )
+            success = data.get("issueUpdate", {}).get("success", False)
+            if success:
+                logger.info(f"Moved issue {issue_id} to state '{state_name}'")
+            return success
+        except Exception as e:
+            logger.error(f"Failed to update state for {issue_id}: {e}")
+            return False
