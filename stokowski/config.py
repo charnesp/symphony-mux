@@ -22,6 +22,9 @@ class TrackerConfig:
     terminal_states: list[str] = field(
         default_factory=lambda: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     )
+    gate_states: list[str] = field(default_factory=lambda: ["Awaiting Gate"])
+    gate_approved_state: str = "Gate Approved"
+    rework_state: str = "Rework"
 
 
 @dataclass
@@ -75,6 +78,37 @@ class ServerConfig:
 
 
 @dataclass
+class GateConfig:
+    """Human gate checkpoint configuration."""
+    rework_to: str = ""
+    prompt: str = ""
+
+
+@dataclass
+class PipelineConfig:
+    """Ordered pipeline of stages and gates."""
+    stages: list[str] = field(default_factory=list)
+    gates: dict[str, GateConfig] = field(default_factory=dict)
+
+
+@dataclass
+class StageConfig:
+    """Per-stage overrides and prompt template."""
+    name: str = ""
+    runner: str = "claude"
+    model: str | None = None
+    max_turns: int | None = None
+    turn_timeout_ms: int | None = None
+    stall_timeout_ms: int | None = None
+    session: str = "inherit"
+    permission_mode: str | None = None
+    allowed_tools: list[str] | None = None
+    append_system_prompt: str | None = None
+    hooks: HooksConfig | None = None
+    prompt_template: str = ""
+
+
+@dataclass
 class WorkflowDefinition:
     config: ServiceConfig
     prompt_template: str
@@ -89,6 +123,7 @@ class ServiceConfig:
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
+    pipeline: PipelineConfig | None = None
 
     def resolved_api_key(self) -> str:
         key = self.tracker.api_key
