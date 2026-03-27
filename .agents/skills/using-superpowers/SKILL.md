@@ -102,6 +102,22 @@ When multiple skills could apply, use this order:
 "Let's build X" → brainstorming first, then implementation skills.
 "Fix this bug" → debugging first, then domain-specific skills.
 
+## OpenSpec Workflow Skills
+
+For OpenSpec-based projects, use these specific skills for each phase:
+
+| Phase | Skill | Purpose |
+|-------|-------|---------|
+| **Brainstorming** | `openspec-explore` | Think through ideas, investigate problems, clarify requirements |
+| **Writing plans** | `openspec-propose` | Create change with proposal, design, and tasks artifacts |
+| **Executing plans** | `openspec-apply-change` | Implement tasks from the change |
+| **Archiving** | `openspec-archive-change` | Finalize and archive completed changes |
+
+Workflow:
+```
+openspec-explore → openspec-propose → openspec-apply-change → openspec-archive-change
+```
+
 ## Skill Types
 
 **Rigid** (TDD, debugging): Follow exactly. Don't adapt away discipline.
