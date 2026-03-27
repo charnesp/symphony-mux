@@ -301,6 +301,7 @@ async def run_agent_turn(
 
     async def read_stream():
         nonlocal last_activity
+        output_lines = []
         while True:
             line = await proc.stdout.readline()
             if not line:
@@ -309,6 +310,7 @@ async def run_agent_turn(
             attempt.last_event_at = datetime.now(timezone.utc)
 
             line_str = line.decode().strip()
+            output_lines.append(line_str)
             if not line_str:
                 continue
 
@@ -318,6 +320,8 @@ async def run_agent_turn(
                 continue
 
             _process_event(event, attempt, on_event, issue.identifier)
+        attempt.full_output = "\n".join(output_lines)
+        logger.debug(f"Captured full_output for {issue.identifier}: {len(attempt.full_output)} chars")
 
     async def stall_monitor():
         while proc.returncode is None:
@@ -463,7 +467,7 @@ def build_mux_args(
     Uses --quiet mode for cleaner output.
     Prompt is passed via stdin to avoid argument parsing issues with special chars.
     """
-    args = ["npx", "mux", "run", "--quiet"]
+    args = ["npx", "mux", "run", "--json"]
     
     if model:
         args.extend(["--model", model])
@@ -497,6 +501,7 @@ async def run_mux_turn(
         f"Launching mux issue={issue.identifier} "
         f"turn={attempt.turn_count + 1} model={model}"
     )
+    logger.info(f"MUX PROMPT for {issue.identifier}:\n{'='*60}\n{prompt}\n{'='*60}")
 
     # Run before_run hook
     if hooks_cfg.before_run:
@@ -548,7 +553,13 @@ async def run_mux_turn(
 
     async def read_stream():
         nonlocal last_activity
-        output_lines = []
+        raw_output_lines = []
+        assistant_messages = []
+        # Debug: save raw NDJSON to file
+        import os
+        debug_ndjson_path = f"/tmp/stokowski_ndjson_{issue.identifier.replace('-', '_')}.json"
+        debug_file = open(debug_ndjson_path, "w")
+        logger.info(f"Saving raw NDJSON to {debug_ndjson_path}")
         while True:
             line = await proc.stdout.readline()
             if not line:
@@ -560,19 +571,86 @@ async def run_mux_turn(
             if not line_str:
                 continue
 
-            output_lines.append(line_str)
+            raw_output_lines.append(line_str)
+            debug_file.write(line_str + "\n")
+            debug_file.flush()
             attempt.last_message = line_str[:200]
 
-            # Try to parse as JSON for token tracking
+            # Parse as JSON and extract assistant messages
             try:
                 event = json.loads(line_str)
-                # Mux JSON format: {"type": "...", ...}
-                if isinstance(event, dict) and "type" in event:
-                    pass  # Could extract more info here
+                # Mux JSON format: {"type": "event", "payload": {...}}
+                if isinstance(event, dict):
+                    event_type = event.get("type", "")
+                    
+                    # Debug: log event types we see
+                    if event_type not in ("event", "caught-up"):
+                        logger.debug(f"Mux event type: {event_type}")
+                    
+                    # Handle Mux format: wrapped in "event" type with payload
+                    if event_type == "event":
+                        payload = event.get("payload", {})
+                        payload_type = payload.get("type", "")
+                        
+                        # Debug: log payload types (limit frequency)
+                        if payload_type not in ("stream-delta", "runtime-status"):
+                            logger.debug(f"Mux payload type: {payload_type}, keys: {list(payload.keys())}")
+                        
+                        # Stream-end contains the complete message with parts
+                        # Take ALL text parts and concatenate them
+                        if payload_type == "stream-end":
+                            parts = payload.get("parts", [])
+                            text_parts = []
+                            for part in parts:
+                                if part.get("type") == "text":
+                                    text = part.get("text", "")
+                                    if text:
+                                        text_parts.append(text)
+                            if text_parts:
+                                combined_text = "".join(text_parts)
+                                assistant_messages.append(combined_text)
+                                logger.info(f"Mux: Extracted {len(combined_text)} chars from {len(text_parts)} text parts")
+                        
+                        # Token usage from run-complete
+                    elif event_type == "run-complete":
+                        usage = event.get("usage", {})
+                        if usage:
+                            attempt.input_tokens = usage.get("inputTokens", 0)
+                            attempt.output_tokens = usage.get("outputTokens", 0)
+                            attempt.total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
+                            
+                    # Handle Claude Code format (for compatibility)
+                    elif event_type == "assistant":
+                        msg = event.get("message", {})
+                        content = msg.get("content", "")
+                        if content:
+                            assistant_messages.append(content)
+                    elif event_type == "result":
+                        # Extract token usage from result
+                        usage = event.get("usage", {})
+                        if usage:
+                            attempt.input_tokens = usage.get("input_tokens", 0)
+                            attempt.output_tokens = usage.get("output_tokens", 0)
+                            attempt.total_tokens = usage.get("total_tokens", 0) or attempt.input_tokens + attempt.output_tokens
+                        # Also check for direct result text
+                        result_text = event.get("result", "")
+                        if isinstance(result_text, str) and result_text:
+                            assistant_messages.append(result_text)
             except json.JSONDecodeError:
-                pass
+                # Not JSON - Mux may output plain text alongside NDJSON
+                # Collect these lines as assistant output
+                if line_str.strip():
+                    assistant_messages.append(line_str)
+                    logger.debug(f"Mux: Non-JSON text ({len(line_str)} chars)")
 
-        return output_lines
+        # Store raw NDJSON for debugging, but also reconstructed readable output
+        debug_file.close()
+        raw_ndjson = "\n".join(raw_output_lines)
+        readable_output = "\n".join(assistant_messages)
+        attempt.full_output = readable_output
+        logger.info(f"MUX OUTPUT for {issue.identifier}:\n{'='*60}\n{readable_output}\n{'='*60}")
+        logger.info(f"Raw NDJSON saved to {debug_ndjson_path} ({len(raw_output_lines)} lines)")
+        return raw_output_lines
 
     async def stall_monitor():
         while proc.returncode is None:

@@ -27,6 +27,7 @@ from .linear import LinearClient
 from .models import Issue, RetryEntry, RunAttempt
 from .prompt import assemble_prompt, build_lifecycle_section
 from .runner import run_agent_turn, run_turn
+from .reporting import extract_report, format_no_report_comment, format_report_comment
 from .tracking import make_gate_comment, make_state_comment, parse_latest_tracking
 from .workspace import ensure_workspace, remove_workspace
 
@@ -841,6 +842,7 @@ class Orchestrator:
                 issue=issue,
                 state_name=state_name,
                 state_cfg=state_cfg,
+                workflow_states=self.cfg.states,
                 run=run,
                 is_rework=False,
                 attempt=attempt_num or 1,
@@ -870,6 +872,7 @@ class Orchestrator:
                 issue=issue,
                 state_name=state_name,
                 state_cfg=state_cfg,
+                workflow_states=self.cfg.states,
                 run=run,
                 is_rework=False,
                 attempt=attempt_num or 1,
@@ -924,6 +927,55 @@ class Orchestrator:
         """Callback for agent events."""
         logger.debug(f"Agent event issue={identifier} type={event_type}")
 
+    async def _post_work_report(
+        self, issue: Issue, attempt: RunAttempt, state_name: str | None = None
+    ) -> None:
+        """Extract and post work report after agent completion."""
+        if not attempt.full_output:
+            return
+
+        # Determine if next state is a gate
+        is_gate = False
+        if state_name and state_name in self.cfg.states:
+            state_cfg = self.cfg.states[state_name]
+            if state_cfg.transitions:
+                for target in state_cfg.transitions.values():
+                    target_cfg = self.cfg.states.get(target)
+                    if target_cfg and target_cfg.type == "gate":
+                        is_gate = True
+                        break
+
+        # Extract report from agent output
+        report_content = extract_report(attempt.full_output)
+        
+        logger.info(f"Report extraction for {issue.identifier}: {'found' if report_content else 'not found'} ({len(attempt.full_output)} chars in full_output)")
+
+        if report_content:
+            comment = format_report_comment(
+                report_content=report_content,
+                issue=issue,
+                state_name=state_name or "unknown",
+                run=attempt.attempt or 1,
+                is_gate=is_gate,
+            )
+        else:
+            comment = format_no_report_comment(
+                issue=issue,
+                state_name=state_name or "unknown",
+                run=attempt.attempt or 1,
+            )
+
+        # Post to Linear
+        try:
+            client = self._ensure_linear_client()
+            success = await client.post_comment(issue.id, comment)
+            if success:
+                logger.info(f"Posted work report for {issue.identifier}")
+            else:
+                logger.error(f"Failed to post work report for {issue.identifier}")
+        except Exception as e:
+            logger.error(f"Error posting work report for {issue.identifier}: {e}")
+
     def _on_worker_exit(self, issue: Issue, attempt: RunAttempt):
         """Handle worker completion."""
         self.total_input_tokens += attempt.input_tokens
@@ -940,6 +992,12 @@ class Orchestrator:
         attempt.completed_at = completed_at
         if attempt.status != "canceled":
             self._last_completed_at[issue.id] = completed_at
+
+        # Post work report (async)
+        if attempt.full_output:
+            asyncio.create_task(
+                self._post_work_report(issue, attempt, attempt.state_name)
+            )
 
         self.running.pop(issue.id, None)
         self._tasks.pop(issue.id, None)

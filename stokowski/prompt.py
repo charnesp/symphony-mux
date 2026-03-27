@@ -120,6 +120,7 @@ def build_lifecycle_section(
     state_name: str,
     state_cfg: StateConfig,
     linear_states: LinearStatesConfig,
+    workflow_states: dict[str, Any] | None = None,
     run: int = 1,
     is_rework: bool = False,
     recent_comments: list[dict[str, Any]] | None = None,
@@ -201,14 +202,73 @@ def build_lifecycle_section(
             lines.append(f"- `{trigger}` → **{target}**")
         lines.append("")
 
-    # Instructions for completion
+    # Check if any transition leads to a gate
+    has_gate_transition = False
+    gate_targets = []
+    if workflow_states and state_cfg.transitions:
+        for trigger, target in state_cfg.transitions.items():
+            target_cfg = workflow_states.get(target)
+            if target_cfg and getattr(target_cfg, "type", None) == "gate":
+                has_gate_transition = True
+                gate_targets.append((trigger, target))
+
+    # Instructions for completion - UPDATED with report requirements
     lines.append("### When Done")
     lines.append("")
     lines.append(
-        "When you have completed your work, post a summary comment on "
-        "the Linear issue describing what was done and any decisions made."
+        "When you have completed your work, you MUST include a structured "
+        "work report in your response using the XML tags below. "
+        "Stokowski will extract this report and post it as a comment on the Linear issue."
     )
     lines.append("")
+    lines.append("**Required format:**")
+    lines.append("")
+    lines.append("```xml")
+    lines.append("<stokowski:report>")
+    lines.append("## Summary")
+    lines.append("- What was accomplished")
+    lines.append("- Key decisions made")
+    lines.append("- Any blockers encountered")
+    lines.append("")
+    lines.append("## Technical Details")
+    lines.append("[Detailed explanation if needed]")
+    lines.append("")
+    lines.append("## Files Changed")
+    lines.append("- `path/to/file.py` - brief description")
+    lines.append("</stokowski:report>")
+    lines.append("```")
+    lines.append("")
+
+    # Gate-specific instructions - NEW
+    if has_gate_transition:
+        lines.append("### Gate Review Required")
+        lines.append("")
+        lines.append(
+            "**IMPORTANT:** The next state is a GATE requiring human approval. "
+            "When writing your report, include an 'Approval Required' section:"
+        )
+        lines.append("")
+        lines.append("```xml")
+        lines.append("<stokowski:report>")
+        lines.append("## Summary")
+        lines.append("...")
+        lines.append("")
+        lines.append("## Approval Required")
+        lines.append("The following items need explicit approval before proceeding:")
+        lines.append("")
+        lines.append("1. **[Category]:** [Specific item to validate]")
+        lines.append("2. **[Category]:** [Specific item to validate]")
+        lines.append("...")
+        lines.append("")
+        lines.append("**Available transitions after review:**")
+        for trigger, target in gate_targets:
+            lines.append(f"- Use `{trigger}` → moves to **{target}**")
+        lines.append("- Use `rework` → returns for corrections")
+        lines.append("")
+        lines.append("</stokowski:report>")
+        lines.append("```")
+        lines.append("")
+
     lines.append("<!-- END STOKOWSKI LIFECYCLE -->")
 
     return "\n".join(lines)
@@ -220,6 +280,7 @@ def assemble_prompt(
     issue: Issue,
     state_name: str,
     state_cfg: StateConfig,
+    workflow_states: dict[str, Any],
     run: int = 1,
     is_rework: bool = False,
     attempt: int = 1,
@@ -277,6 +338,7 @@ def assemble_prompt(
             raw = load_prompt_file(state_cfg.prompt, workflow_dir)
             rendered = render_template(raw, context)
             parts.append(rendered)
+            log.info(f"Loaded stage prompt for '{state_name}': {state_cfg.prompt}")
         except FileNotFoundError:
             log.warning(
                 "Stage prompt file not found for state '%s': %s",
@@ -296,6 +358,7 @@ def assemble_prompt(
         state_name=state_name,
         state_cfg=state_cfg,
         linear_states=cfg.linear_states,
+        workflow_states=workflow_states,
         run=run,
         is_rework=is_rework,
         recent_comments=recent,
