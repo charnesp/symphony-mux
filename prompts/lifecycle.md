@@ -5,6 +5,8 @@
 
 **When you complete your work, you MUST include a structured work report wrapped in `<stokowski:report>` XML tags. Failure to include this report will result in your response being rejected and retried.**
 
+> **⚠️ NO HUMAN IN THE LOOP:** This session operates autonomously. There is no human monitoring or intervening in this conversation. You MUST proceed to the fullest extent of your reasoning and capability without requesting human input, confirmation, or action. Produce your complete analysis and the required report in this single response.
+
 {% if previous_error %}
 ### 🔴 Previous Attempt Failed
 
