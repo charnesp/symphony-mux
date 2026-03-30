@@ -49,6 +49,7 @@ class RunAttempt:
     completed_at: datetime | None = None
     state_name: str | None = None       # current internal state machine state
     full_output: str = ""                # complete agent output for report extraction
+    previous_error: str | None = None    # error from previous attempt (for retry feedback)
 
 
 @dataclass

@@ -19,6 +19,53 @@ EventCallback = Callable[[str, str, dict[str, Any]], None]
 # Callback for registering/unregistering child PIDs
 PidCallback = Callable[[int, bool], None]  # (pid, is_register)
 
+# Report validation marker
+REPORT_START_TAG = "<stokowski:report>"
+REPORT_END_TAG = "</stokowski:report>"
+
+
+def validate_agent_output(output_text: str | None) -> tuple[bool, str | None]:
+    """Validate that the agent output contains the required stokowski:report.
+
+    Args:
+        output_text: The full text output from the agent.
+
+    Returns:
+        Tuple of (is_valid, error_message).
+        If is_valid is True, error_message is None.
+        If is_valid is False, error_message describes what's missing.
+    """
+    if not output_text:
+        return False, "Agent produced no output."
+
+    # Check for opening tag
+    if REPORT_START_TAG not in output_text:
+        return False, (
+            f"MISSING REQUIRED REPORT: Your response must include "
+            f"the XML tag `{REPORT_START_TAG}`. "
+            f"You MUST wrap your work summary in these tags at the END of your response. "
+            f"See the '⚠️ REQUIRED: Structured Work Report' section in the prompt."
+        )
+
+    # Check for closing tag
+    if REPORT_END_TAG not in output_text:
+        return False, (
+            f"MISSING CLOSING TAG: Your response has `{REPORT_START_TAG}` but is missing "
+            f"the closing tag `{REPORT_END_TAG}`. "
+            f"Ensure your report is properly closed."
+        )
+
+    # Check tag order
+    start_idx = output_text.find(REPORT_START_TAG)
+    end_idx = output_text.find(REPORT_END_TAG)
+    if start_idx > end_idx:
+        return False, (
+            f"INVALID TAG ORDER: The closing tag appears before the opening tag. "
+            f"Ensure `{REPORT_START_TAG}` comes before `{REPORT_END_TAG}`."
+        )
+
+    return True, None
+
 
 def build_claude_args(
     claude_cfg: ClaudeConfig,
@@ -223,7 +270,16 @@ async def run_codex_turn(
             except (asyncio.TimeoutError, Exception):
                 pass
         if proc.returncode == 0:
-            attempt.status = "succeeded"
+            # Validate the agent output contains required report
+            is_valid, error_msg = validate_agent_output(attempt.full_output)
+            if is_valid:
+                attempt.status = "succeeded"
+            else:
+                attempt.status = "failed"
+                attempt.error = f"Report validation failed: {error_msg}"
+                logger.warning(
+                    f"Report validation failed for {issue.identifier}: {error_msg}"
+                )
         else:
             attempt.status = "failed"
             attempt.error = f"Codex exit code {proc.returncode}: {stderr_output}"
@@ -395,7 +451,16 @@ async def run_agent_turn(
     # Determine final status from exit code if not already set by stall/timeout
     if attempt.status == "streaming":
         if proc.returncode == 0:
-            attempt.status = "succeeded"
+            # Validate the agent output contains required report
+            is_valid, error_msg = validate_agent_output(attempt.full_output)
+            if is_valid:
+                attempt.status = "succeeded"
+            else:
+                attempt.status = "failed"
+                attempt.error = f"Report validation failed: {error_msg}"
+                logger.warning(
+                    f"Report validation failed for {issue.identifier}: {error_msg}"
+                )
         else:
             stderr_output = ""
             if proc.stderr:
@@ -729,7 +794,16 @@ async def run_mux_turn(
                 pass
 
         if proc.returncode == 0:
-            attempt.status = "succeeded"
+            # Validate the agent output contains required report
+            is_valid, error_msg = validate_agent_output(attempt.full_output)
+            if is_valid:
+                attempt.status = "succeeded"
+            else:
+                attempt.status = "failed"
+                attempt.error = f"Report validation failed: {error_msg}"
+                logger.warning(
+                    f"Report validation failed for {issue.identifier}: {error_msg}"
+                )
         else:
             attempt.status = "failed"
             attempt.error = f"Mux exit code {proc.returncode}: {stderr_output}"

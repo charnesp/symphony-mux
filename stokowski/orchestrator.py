@@ -614,7 +614,7 @@ class Orchestrator:
 
         return True
 
-    def _dispatch(self, issue: Issue, attempt_num: int | None = None):
+    def _dispatch(self, issue: Issue, attempt_num: int | None = None, previous_error: str | None = None):
         """Dispatch a worker for an issue."""
         self.claimed.add(issue.id)
 
@@ -633,6 +633,7 @@ class Orchestrator:
             issue_identifier=issue.identifier,
             attempt=attempt_num,
             state_name=state_name,
+            previous_error=previous_error,
         )
 
         # Session handling
@@ -738,7 +739,7 @@ class Orchestrator:
                     self._on_worker_exit(issue, attempt)
                     return
 
-            prompt = await self._render_prompt_async(issue, attempt.attempt, state_name)
+            prompt = await self._render_prompt_async(issue, attempt.attempt, state_name, attempt.previous_error)
 
             # Build env vars for the agent subprocess from workflow.yaml config
             agent_env = self.cfg.agent_env()
@@ -819,7 +820,7 @@ class Orchestrator:
             self._on_worker_exit(issue, attempt)
 
     async def _render_prompt_async(
-        self, issue: Issue, attempt_num: int | None, state_name: str | None = None
+        self, issue: Issue, attempt_num: int | None, state_name: str | None = None, previous_error: str | None = None
     ) -> str:
         """Render prompt using state machine prompt assembly (async — fetches comments)."""
         if state_name and state_name in self.cfg.states:
@@ -848,6 +849,7 @@ class Orchestrator:
                 attempt=attempt_num or 1,
                 last_run_at=last_run_at,
                 comments=comments,
+                previous_error=previous_error,
             )
 
         # Legacy fallback
@@ -1104,7 +1106,7 @@ class Orchestrator:
             )
             return
 
-        self._dispatch(issue, attempt_num=entry.attempt)
+        self._dispatch(issue, attempt_num=entry.attempt, previous_error=entry.error)
 
     async def _reconcile(self):
         """Reconcile running issues against current Linear state."""
