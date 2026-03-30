@@ -228,6 +228,7 @@ async def run_codex_turn(
                 attempt.error = f"No output for {elapsed:.0f}s"
                 return
 
+    output_lines: list[str] = []
     try:
         reader = asyncio.create_task(read_stream())
         monitor = asyncio.create_task(stall_monitor())
@@ -245,6 +246,12 @@ async def run_codex_turn(
             attempt.error = f"Turn exceeded {turn_timeout_s}s"
         else:
             await asyncio.wait_for(proc.wait(), timeout=30)
+            # Capture output from reader task
+            if reader in done:
+                try:
+                    output_lines = reader.result()
+                except Exception:
+                    pass
 
         for task in pending:
             task.cancel()
@@ -259,6 +266,9 @@ async def run_codex_turn(
         attempt.status = "failed"
         attempt.error = str(e)
         # Still need to run after_run hook and unregister PID below
+
+    # Store full output for validation and reporting
+    attempt.full_output = "\n".join(output_lines)
 
     # Determine final status from exit code if not already set
     if attempt.status == "streaming":
