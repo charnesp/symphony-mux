@@ -11,6 +11,25 @@ def test_run_mux_turn_exists():
     assert callable(run_mux_turn)
 
 
+def test_build_claude_args_no_prompt_in_args():
+    """Build claude args should NOT include prompt in -p argument when using stdin."""
+    from stokowski.runner import build_claude_args
+    from pathlib import Path
+    from stokowski.config import ClaudeConfig
+    
+    config = ClaudeConfig(command="claude")
+    prompt = "This is a test prompt with --- special chars"
+    
+    args = build_claude_args(
+        claude_cfg=config,
+        workspace_path=Path("/tmp/workspace"),
+    )
+    
+    # Prompt should NOT be in args (it's passed via stdin instead)
+    assert prompt not in args
+
+
+
 def test_build_mux_args_basic():
     """Build mux run arguments with minimal parameters."""
     from stokowski.runner import build_mux_args

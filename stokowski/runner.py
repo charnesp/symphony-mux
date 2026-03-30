@@ -22,19 +22,21 @@ PidCallback = Callable[[int, bool], None]  # (pid, is_register)
 
 def build_claude_args(
     claude_cfg: ClaudeConfig,
-    prompt: str,
     workspace_path: Path,
     session_id: str | None = None,
 ) -> list[str]:
-    """Build the claude CLI argument list."""
+    """Build the claude CLI argument list.
+    
+    Prompt is passed via stdin to avoid argument parsing issues with special chars.
+    """
     args = [claude_cfg.command]
 
     if session_id:
         # Continuation turn
-        args.extend(["-p", prompt, "--resume", session_id])
+        args.extend(["-p", "", "--resume", session_id])
     else:
         # First turn
-        args.extend(["-p", prompt])
+        args.extend(["-p", ""])
 
     args.extend(["--verbose", "--output-format", "stream-json"])
 
@@ -248,8 +250,13 @@ async def run_agent_turn(
     env: dict[str, str] | None = None,
 ) -> RunAttempt:
     """Run a single Claude Code turn. Returns updated RunAttempt."""
+    import os
+    
+    # Inherit environment variables if not explicitly provided
+    # When env is None, subprocess inherits from parent automatically
+    
     args = build_claude_args(
-        claude_cfg, prompt, workspace_path, attempt.session_id
+        claude_cfg, workspace_path, attempt.session_id
     )
 
     logger.info(
@@ -279,12 +286,19 @@ async def run_agent_turn(
         proc = await asyncio.create_subprocess_exec(
             *args,
             cwd=str(workspace_path),
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
             limit=10 * 1024 * 1024,  # 10MB line buffer (default 64KB)
             env=env,
         )
+        
+        # Write prompt to stdin (avoids argument parsing issues)
+        proc.stdin.write(prompt.encode())
+        await proc.stdin.drain()
+        proc.stdin.close()
+        
         if on_pid and proc.pid:
             on_pid(proc.pid, True)
     except FileNotFoundError:
@@ -556,7 +570,7 @@ async def run_mux_turn(
         raw_output_lines = []
         assistant_messages = []
         # Debug: save raw NDJSON to file
-        import os
+        
         debug_ndjson_path = f"/tmp/stokowski_ndjson_{issue.identifier.replace('-', '_')}.json"
         debug_file = open(debug_ndjson_path, "w")
         logger.info(f"Saving raw NDJSON to {debug_ndjson_path}")

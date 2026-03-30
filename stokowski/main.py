@@ -26,7 +26,13 @@ def _load_dotenv():
             continue
         if "=" in line:
             key, _, value = line.partition("=")
-            os.environ[key.strip()] = value.strip()
+            key = key.strip()
+            value = value.strip()
+            # Remove surrounding quotes if present
+            if (value.startswith('"') and value.endswith('"')) or \
+               (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            os.environ[key] = value
 
 
 from rich.columns import Columns

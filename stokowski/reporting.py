@@ -34,7 +34,10 @@ def extract_report(agent_output: str) -> str | None:
     match = REPORT_PATTERN.search(agent_output)
     if not match:
         return None
-    return match.group(1).strip()
+    content = match.group(1).strip()
+    # Convert escaped newlines to actual newlines
+    content = content.replace('\\n', '\n')
+    return content
 
 
 def has_approval_section(report_content: str) -> bool:
