@@ -288,7 +288,7 @@ async def run_turn(
 **Acceptance Criteria**:
 - [x] Add comment documenting `runner: mux` option
 - [x] Include example state using mux
-- [ ] Document that mux uses the same options as claude
+- [x] Document that mux uses the same options as claude
 
 **Estimated**: 30 minutes
 

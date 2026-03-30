@@ -78,7 +78,9 @@ hooks:
 # ---------------------------------------------------------------------------
 # Claude defaults (inherited by all agent states unless overridden)
 # States using runner: codex will use the Codex CLI instead.
-# States using runner: mux will use the Mux CLI instead (uses same options as claude).
+# States using runner: mux will use the Mux CLI instead.
+# Note: Mux uses the same configuration options as Claude (permission_mode, model,
+# max_turns, timeouts, etc.) since it's a Claude Code compatible runner.
 # ---------------------------------------------------------------------------
 claude:
   permission_mode: auto
