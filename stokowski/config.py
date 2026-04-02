@@ -101,6 +101,24 @@ class PromptsConfig:
 
 
 @dataclass
+class WorkflowConfig:
+    """Configuration for a single workflow.
+
+    Attributes:
+        name: The workflow identifier (e.g., "debug", "feature").
+        label: The Linear label that triggers this workflow (e.g., "debug").
+        default: Whether this is the default workflow for issues without matching labels.
+        states: State machine definition for this workflow.
+        prompts: Prompt file references for this workflow.
+    """
+    name: str = ""
+    label: str | None = None
+    default: bool = False
+    states: dict[str, StateConfig] = field(default_factory=dict)
+    prompts: PromptsConfig = field(default_factory=PromptsConfig)
+
+
+@dataclass
 class StateConfig:
     """A single state in the state machine."""
     name: str = ""
@@ -139,6 +157,7 @@ class ServiceConfig:
     linear_states: LinearStatesConfig = field(default_factory=LinearStatesConfig)
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
     states: dict[str, StateConfig] = field(default_factory=dict)
+    workflows: dict[str, WorkflowConfig] = field(default_factory=dict)
 
     def resolved_api_key(self) -> str:
         key = self.tracker.api_key
@@ -176,33 +195,108 @@ class ServiceConfig:
         """Return Linear state names that should be polled for candidates.
 
         Includes the todo state (pickup) and all agent state mappings.
+        In multi-workflow mode, collects states from all workflows.
         """
         ls = self.linear_states
         seen: list[str] = []
         # Always include the todo state so new issues get picked up
         if ls.todo and ls.todo not in seen:
             seen.append(ls.todo)
+
+        # Collect agent states from root config (legacy mode)
         for sc in self.states.values():
             if sc.type == "agent":
                 linear_name = _resolve_linear_state_name(sc.linear_state, ls)
                 if linear_name and linear_name not in seen:
                     seen.append(linear_name)
+
+        # Collect agent states from all workflows (multi-workflow mode)
+        for wf in self.workflows.values():
+            for sc in wf.states.values():
+                if sc.type == "agent":
+                    linear_name = _resolve_linear_state_name(sc.linear_state, ls)
+                    if linear_name and linear_name not in seen:
+                        seen.append(linear_name)
         return seen
 
     def gate_linear_states(self) -> list[str]:
-        """Return Linear state names for all gate states."""
+        """Return Linear state names for all gate states.
+
+        In multi-workflow mode, collects states from all workflows.
+        """
         ls = self.linear_states
         seen: list[str] = []
+
+        # Collect gate states from root config (legacy mode)
         for sc in self.states.values():
             if sc.type == "gate":
                 linear_name = _resolve_linear_state_name(sc.linear_state, ls)
                 if linear_name and linear_name not in seen:
                     seen.append(linear_name)
+
+        # Collect gate states from all workflows (multi-workflow mode)
+        for wf in self.workflows.values():
+            for sc in wf.states.values():
+                if sc.type == "gate":
+                    linear_name = _resolve_linear_state_name(sc.linear_state, ls)
+                    if linear_name and linear_name not in seen:
+                        seen.append(linear_name)
         return seen
 
     def terminal_linear_states(self) -> list[str]:
         """Return the terminal Linear state names."""
         return list(self.linear_states.terminal)
+
+    def get_workflow_for_issue(self, issue: Any) -> WorkflowConfig:
+        """Route an issue to its workflow based on labels.
+
+        Args:
+            issue: The Linear issue with labels attribute.
+
+        Returns:
+            The matching WorkflowConfig.
+
+        Raises:
+            ValueError: If no workflow matches and no default exists.
+        """
+        labels = getattr(issue, "labels", []) or []
+
+        # If using multi-workflow mode (workflows: section exists)
+        if self.workflows:
+            # First match wins (YAML order)
+            for name, wf in self.workflows.items():
+                if wf.label and wf.label in labels:
+                    return wf
+            # Fallback to default workflow
+            for name, wf in self.workflows.items():
+                if wf.default:
+                    return wf
+            raise ValueError(
+                f"No workflow matches issue labels {labels} and no default workflow defined"
+            )
+
+        # Legacy single-workflow mode: create implicit workflow from root config
+        return WorkflowConfig(
+            name="default",
+            default=True,
+            states=self.states,
+            prompts=self.prompts,
+        )
+
+    def get_default_workflow_name(self) -> str | None:
+        """Return the name of the default workflow, if any."""
+        if self.workflows:
+            for name, wf in self.workflows.items():
+                if wf.default:
+                    return name
+        return None if self.workflows else "default"
+
+    def entry_state_for_workflow(self, workflow: WorkflowConfig) -> str | None:
+        """Return the first agent state for a workflow."""
+        for name, sc in workflow.states.items():
+            if sc.type == "agent":
+                return name
+        return None
 
 
 def _resolve_linear_state_name(key: str, ls: LinearStatesConfig) -> str:
@@ -403,6 +497,31 @@ def parse_workflow_file(path: str | Path) -> WorkflowDefinition:
         sd = state_data or {}
         states[state_name] = _parse_state_config(state_name, sd)
 
+    # Parse workflows section (multi-workflow mode)
+    workflows_raw = config_raw.get("workflows")
+    workflows: dict[str, WorkflowConfig] = {}
+    if workflows_raw:
+        for wf_name, wf_data in workflows_raw.items():
+            wf_states: dict[str, StateConfig] = {}
+            wf_states_raw = wf_data.get("states", {})
+            for state_name, state_data in wf_states_raw.items():
+                sd = state_data or {}
+                wf_states[state_name] = _parse_state_config(state_name, sd)
+
+            wf_prompts_raw = wf_data.get("prompts", {}) or {}
+            wf_prompts = PromptsConfig(
+                global_prompt=wf_prompts_raw.get("global_prompt"),
+                lifecycle_prompt=wf_prompts_raw.get("lifecycle_prompt", "prompts/lifecycle.md"),
+            )
+
+            workflows[wf_name] = WorkflowConfig(
+                name=wf_name,
+                label=wf_data.get("label"),
+                default=wf_data.get("default", False),
+                states=wf_states,
+                prompts=wf_prompts,
+            )
+
     cfg = ServiceConfig(
         tracker=tracker,
         polling=polling,
@@ -414,6 +533,7 @@ def parse_workflow_file(path: str | Path) -> WorkflowDefinition:
         linear_states=linear_states,
         prompts=prompts,
         states=states,
+        workflows=workflows,
     )
 
     return WorkflowDefinition(config=cfg, prompt_template=prompt_template)
@@ -431,13 +551,16 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
     if not cfg.tracker.project_slug:
         errors.append("Missing tracker.project_slug")
 
-    if not cfg.states:
-        errors.append("No states defined")
+    # In legacy mode, root states must be defined
+    # In multi-workflow mode, workflows must have states (validated per workflow below)
+    if not cfg.states and not cfg.workflows:
+        errors.append("No states or workflows defined")
         return errors
 
     # Valid linear_state keys
     valid_linear_keys = {"active", "review", "gate_approved", "rework", "terminal"}
 
+    # Validate root states (legacy mode) - only if workflows not defined
     has_agent = False
     has_terminal = False
     all_state_names = set(cfg.states.keys())
@@ -485,10 +608,12 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
                     f"unknown state '{target}'"
                 )
 
-    if not has_agent:
-        errors.append("No agent states defined (need at least one state with type 'agent')")
-    if not has_terminal:
-        errors.append("No terminal states defined (need at least one state with type 'terminal')")
+    # Only require root agent/terminal states in legacy mode
+    if not cfg.workflows:
+        if not has_agent:
+            errors.append("No agent states defined (need at least one state with type 'agent')")
+        if not has_terminal:
+            errors.append("No terminal states defined (need at least one state with type 'terminal')")
 
     # Warn about unreachable states (non-entry states that no transition points to)
     entry = cfg.entry_state
@@ -504,5 +629,76 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
     unreachable = all_state_names - reachable
     for name in unreachable:
         log.warning("State '%s' is unreachable (no transitions lead to it)", name)
+
+    # Validate multi-workflow configuration
+    if cfg.workflows:
+        # Check for multiple default workflows
+        default_workflows = [name for name, wf in cfg.workflows.items() if wf.default]
+        if len(default_workflows) > 1:
+            errors.append(f"Multiple workflows marked as default: {', '.join(default_workflows)}")
+
+        # Check for duplicate labels across workflows
+        label_to_workflows: dict[str, list[str]] = {}
+        for wf_name, wf in cfg.workflows.items():
+            if wf.label:
+                label_to_workflows.setdefault(wf.label, []).append(wf_name)
+        for label, wf_names in label_to_workflows.items():
+            if len(wf_names) > 1:
+                errors.append(f"Multiple workflows have the same label '{label}': {', '.join(wf_names)}")
+
+        # Validate each workflow's state machine
+        for wf_name, wf in cfg.workflows.items():
+            if not wf.states:
+                errors.append(f"Workflow '{wf_name}' has no states defined")
+                continue
+
+            wf_has_agent = False
+            wf_has_terminal = False
+            wf_state_names = set(wf.states.keys())
+
+            for state_name, sc in wf.states.items():
+                # Check type
+                if sc.type not in ("agent", "gate", "terminal"):
+                    errors.append(f"Workflow '{wf_name}' state '{state_name}' has invalid type: {sc.type}")
+                    continue
+
+                if sc.type == "agent":
+                    wf_has_agent = True
+                    if not sc.prompt:
+                        errors.append(f"Workflow '{wf_name}' agent state '{state_name}' is missing 'prompt' field")
+
+                elif sc.type == "gate":
+                    if not sc.rework_to:
+                        errors.append(f"Workflow '{wf_name}' gate state '{state_name}' is missing 'rework_to' field")
+                    elif sc.rework_to not in wf_state_names:
+                        errors.append(
+                            f"Workflow '{wf_name}' gate state '{state_name}' rework_to target '{sc.rework_to}' "
+                            f"is not a defined state"
+                        )
+                    if "approve" not in sc.transitions:
+                        errors.append(f"Workflow '{wf_name}' gate state '{state_name}' is missing 'approve' transition")
+
+                elif sc.type == "terminal":
+                    wf_has_terminal = True
+
+                # Validate linear_state key
+                if sc.linear_state not in valid_linear_keys:
+                    errors.append(
+                        f"Workflow '{wf_name}' state '{state_name}' has invalid linear_state: '{sc.linear_state}' "
+                        f"(valid: {', '.join(sorted(valid_linear_keys))})"
+                    )
+
+                # Validate transitions
+                for trigger, target in sc.transitions.items():
+                    if target not in wf_state_names:
+                        errors.append(
+                            f"Workflow '{wf_name}' state '{state_name}' transition '{trigger}' points to "
+                            f"unknown state '{target}'"
+                        )
+
+            if not wf_has_agent:
+                errors.append(f"Workflow '{wf_name}' has no agent states defined")
+            if not wf_has_terminal:
+                errors.append(f"Workflow '{wf_name}' has no terminal states defined")
 
     return errors

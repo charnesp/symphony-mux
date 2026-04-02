@@ -572,11 +572,11 @@ def build_mux_args(
     Uses --quiet mode for cleaner output.
     Prompt is passed via stdin to avoid argument parsing issues with special chars.
     """
-    args = ["npx", "mux", "run", "--json"]
-    
+    args = ["npx", "mux", "run", "--quiet", "--json"]
+
     if model:
         args.extend(["--model", model])
-    
+
     return args
 
 

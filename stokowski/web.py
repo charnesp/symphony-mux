@@ -556,6 +556,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
     const rows = all.map(r => {
       const stateInfo = r.state_name ? `<span style="color:var(--muted);font-size:11px;margin-left:8px">${esc(r.state_name)}</span>` : '';
+      const workflowInfo = r.workflow_name ? `<span style="color:var(--amber-dim);font-size:10px;margin-left:8px">[${esc(r.workflow_name)}]</span>` : '';
       return `
       <div class="agent-card">
         <div>
@@ -563,7 +564,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
         <div>
           <div class="agent-status-row">
-            ${statusPill(r.status)}${stateInfo}
+            ${statusPill(r.status)}${stateInfo}${workflowInfo}
           </div>
           <div class="agent-msg">${esc(r.last_message || '—')}</div>
         </div>

@@ -16,7 +16,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+test = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pre-commit>=4.0",
+    "bandit>=1.7",
+    "pip-audit>=2.0",
+    "pyright>=1.1",
+    "ruff>=0.15",
+]
 
 [project.urls]
 Homepage = "https://github.com/Sugar-Coffee/stokowski"
@@ -25,5 +33,55 @@ Repository = "https://github.com/Sugar-Coffee/stokowski"
 [tool.setuptools.packages.find]
 include = ["stokowski*"]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pre-commit>=4.0",
+]
+
 [project.scripts]
 stokowski = "stokowski.main:cli"
+
+[tool.bandit]
+# Configuration pour la détection de vulnérabilités
+exclude_dirs = ["tests", "docs", ".claude", "openspec"]
+skips = ["B101"]  # Skip assert warnings in tests
+severity = "medium"
+confidence = "medium"
+
+[tool.pyright]
+# Configuration pour la vérification de types
+pythonVersion = "3.11"
+include = ["stokowski", "tests"]
+exclude = [".claude", "openspec/changes/**"]
+strict = [
+    "stokowski/config.py",
+    "stokowski/models.py",
+]
+useLibraryCodeForTypes = true
+typeCheckingMode = "basic"
+
+[tool.ruff]
+# Configuration pour le linting et le formatage
+target-version = "py311"
+line-length = 100
+select = [
+    "E",   # pycodestyle errors
+    "F",   # Pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "W",   # pycodestyle warnings
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = ["E501"]  # Line too long (handled by formatter)
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

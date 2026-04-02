@@ -1,0 +1,82 @@
+# Example multi-workflow configuration for Stokowski
+# Uses Linear labels to route issues to different workflows
+
+tracker:
+  project_slug: your-project-slug  # Linear project slug
+  api_key: ${LINEAR_API_KEY}       # Or set LINEAR_API_KEY env var
+
+workflows:
+  # Debug workflow: fast track for bug fixes
+  debug:
+    label: debug
+    states:
+      reproduce:
+        type: agent
+        prompt: prompts/debug/reproduce.md
+        linear_state: active
+        transitions:
+          success: fix
+          failure: terminal
+      fix:
+        type: agent
+        prompt: prompts/debug/fix.md
+        transitions:
+          success: terminal
+          failure: terminal
+      terminal:
+        type: terminal
+    prompts:
+      global_prompt: prompts/debug/global.md
+
+  # Feature workflow: structured development with code review
+  feature:
+    label: feature
+    default: true  # Fallback for issues without "debug" label
+    states:
+      spec:
+        type: agent
+        prompt: prompts/feature/spec.md
+        linear_state: active
+        transitions:
+          success: build
+      build:
+        type: agent
+        prompt: prompts/feature/build.md
+        transitions:
+          success: review
+          failure: spec
+      review:
+        type: gate
+        linear_state: review
+        rework_to: build
+        transitions:
+          approve: terminal
+      terminal:
+        type: terminal
+    prompts:
+      global_prompt: prompts/feature/global.md
+
+  # Hotfix workflow: emergency fixes
+  hotfix:
+    label: hotfix
+    states:
+      fix:
+        type: agent
+        prompt: prompts/hotfix/fix.md
+        linear_state: active
+        transitions:
+          success: terminal
+      terminal:
+        type: terminal
+    prompts:
+      global_prompt: prompts/hotfix/global.md
+
+workspace:
+  root: ./workspaces
+
+claude:
+  model: claude-sonnet-4-6
+  max_turns: 20
+
+agent:
+  max_concurrent_agents: 5

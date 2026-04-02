@@ -14,15 +14,18 @@ STATE_PATTERN = re.compile(r"<!-- stokowski:state ({.*?}) -->")
 GATE_PATTERN = re.compile(r"<!-- stokowski:gate ({.*?}) -->")
 
 
-def make_state_comment(state: str, run: int = 1) -> str:
+def make_state_comment(state: str, run: int = 1, workflow: str | None = None) -> str:
     """Build a structured state-tracking comment."""
-    payload = {
+    payload: dict[str, Any] = {
         "state": state,
         "run": run,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    if workflow:
+        payload["workflow"] = workflow
     machine = f"<!-- stokowski:state {json.dumps(payload)} -->"
-    human = f"**[Stokowski]** Entering state: **{state}** (run {run})"
+    wf_info = f" [{workflow}]" if workflow else ""
+    human = f"**[Stokowski]** Entering state: **{state}**{wf_info} (run {run})"
     return f"{machine}\n\n{human}"
 
 
@@ -32,6 +35,7 @@ def make_gate_comment(
     prompt: str = "",
     rework_to: str | None = None,
     run: int = 1,
+    workflow: str | None = None,
 ) -> str:
     """Build a structured gate-tracking comment."""
     payload: dict[str, Any] = {
@@ -42,6 +46,8 @@ def make_gate_comment(
     }
     if rework_to:
         payload["rework_to"] = rework_to
+    if workflow:
+        payload["workflow"] = workflow
 
     machine = f"<!-- stokowski:gate {json.dumps(payload)} -->"
 

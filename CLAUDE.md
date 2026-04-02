@@ -76,6 +76,31 @@ Each issue gets its own directory under `workspace.root`. Agents run with `cwd` 
 ### Headless system prompt
 Every first-turn launch appends a system prompt via `--append-system-prompt` that instructs Claude not to use interactive skills, slash commands, or plan mode. This prevents agents from stalling on interactive workflows.
 
+### Multi-workflow support
+Stokowski supports multiple workflows via the `workflows:` section in `workflow.yaml`. Each workflow is triggered by a Linear label on the issue:
+
+```yaml
+workflows:
+  debug:
+    label: debug
+    states: { ... }
+    prompts:
+      global_prompt: prompts/debug/global.md
+
+  feature:
+    label: feature
+    default: true  # Fallback for issues without matching labels
+    states: { ... }
+```
+
+**Routing rules:**
+- Issues are routed to workflows based on their Linear labels (exact match)
+- First match wins (YAML order) if multiple labels match
+- One workflow can be marked `default: true` as fallback
+- If no workflow matches and no default exists, dispatch fails with clear error
+
+**Backwards compatibility:** If `workflows:` is absent, Stokowski creates an implicit "default" workflow from the root `states:` and `prompts:` sections. Existing single-workflow configs continue working without changes.
+
 ---
 
 ## Component deep-dives
@@ -92,8 +117,9 @@ Parses `workflow.yaml` (or legacy `.md` with front matter) into typed dataclasse
 - `LinearStatesConfig` — maps logical state names (`todo`, `active`, `review`, `gate_approved`, `rework`, `terminal`) to actual Linear state names. Issues in the `todo` state are picked up and automatically moved to `active` on dispatch.
 - `PromptsConfig` — global prompt file reference
 - `StateConfig` — a single state in the state machine: type, prompt path, linear_state key, runner, session mode, transitions, per-state overrides (model, max_turns, timeouts, hooks), gate-specific fields (rework_to, max_rework)
+- `WorkflowConfig` — a complete workflow with label trigger, default flag, states dict, and prompts config
 
-`ServiceConfig` provides helper methods: `entry_state` (first agent state), `active_linear_states()`, `gate_linear_states()`, `terminal_linear_states()`.
+`ServiceConfig` provides helper methods: `entry_state` (first agent state), `active_linear_states()`, `gate_linear_states()`, `terminal_linear_states()`, `get_workflow_for_issue(issue)` (routes by label), `entry_state_for_workflow(workflow)`.
 
 `merge_state_config(state, root_claude, root_hooks)` merges per-state overrides with root defaults — only specified fields are overridden. Returns `(ClaudeConfig, HooksConfig)`.
 
@@ -252,21 +278,62 @@ Exit code 0 = success. Non-zero = failure (stderr captured for error message).
 
 ## Development setup
 
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management and virtual environments.
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[web]"
+# Install dependencies (creates .venv automatically)
+uv sync
+
+# Install with web dashboard dependencies
+uv sync --extra web
+
+# Install with test dependencies
+uv sync --extra test
+
+# Install pre-commit hooks (recommended)
+uv run pre-commit install
+
+# Run tests
+uv run pytest tests/ -v
 
 # Validate config without dispatching agents
-stokowski --dry-run
+uv run stokowski --dry-run
 
 # Run with verbose logging
-stokowski -v
+uv run stokowski -v
 
 # Run with web dashboard
-stokowski --port 4200
+uv run stokowski --port 4200
 ```
 
-There are no automated tests beyond `--dry-run`. The system is best verified by running against a real Linear project with a test ticket.
+### Using uv tool install
+
+For a global installation without cloning:
+
+```bash
+# Install from git
+uv tool install git+https://github.com/Sugar-Coffee/stokowski.git
+
+# Or install from local clone
+cd stokowski
+uv tool install .
+
+# Then run directly
+stokowski --help
+```
+
+### Pre-commit Hooks
+
+The project includes pre-commit hooks for code quality:
+
+- **Tests** (`pytest`) - Must pass before each commit
+- **Bandit** - Security vulnerability scanning
+- **pip-audit** - Dependency vulnerability checking
+- **Ruff** - Linting and code formatting (replaces flake8, black, isort)
+- **Pyright** - Type checking
+- **YAML/TOML/JSON validation** - Syntax checking
+
+To run hooks manually: `uv run pre-commit run --all-files`
 
 ---
 

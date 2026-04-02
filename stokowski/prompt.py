@@ -14,7 +14,7 @@ from typing import Any
 
 from jinja2 import BaseLoader, Environment, Undefined
 
-from .config import LinearStatesConfig, ServiceConfig, StateConfig
+from .config import LinearStatesConfig, PromptsConfig, ServiceConfig, StateConfig
 from .models import Issue
 from .tracking import get_comments_since, get_last_tracking_timestamp
 
@@ -217,6 +217,7 @@ def assemble_prompt(
     state_name: str,
     state_cfg: StateConfig,
     workflow_states: dict[str, Any],
+    workflow_prompts: PromptsConfig | None = None,
     run: int = 1,
     is_rework: bool = False,
     attempt: int = 1,
@@ -227,7 +228,7 @@ def assemble_prompt(
     """Orchestrate three-layer prompt assembly.
 
     Combines:
-    1. Global prompt (from config's prompts.global_prompt path)
+    1. Global prompt (from workflow or config's prompts.global_prompt path)
     2. Stage prompt (from state_cfg.prompt path)
     3. Lifecycle injection (auto-generated)
 
@@ -239,6 +240,8 @@ def assemble_prompt(
         issue: The Linear issue.
         state_name: Internal state machine state name.
         state_cfg: Configuration for the current state.
+        workflow_states: All states in the current workflow.
+        workflow_prompts: PromptsConfig for the current workflow (optional, falls back to cfg.prompts).
         run: Current run number.
         is_rework: Whether this is a rework run.
         attempt: Retry attempt within this run.
@@ -259,15 +262,18 @@ def assemble_prompt(
 
     parts: list[str] = []
 
+    # Use workflow-specific prompts if provided, otherwise fall back to global config
+    prompts = workflow_prompts if workflow_prompts is not None else cfg.prompts
+
     # Layer 1: Global prompt
-    if cfg.prompts.global_prompt:
+    if prompts.global_prompt:
         try:
-            raw = load_prompt_file(cfg.prompts.global_prompt, workflow_dir)
+            raw = load_prompt_file(prompts.global_prompt, workflow_dir)
             rendered = render_template(raw, context)
             parts.append(rendered)
         except FileNotFoundError:
             log.warning(
-                "Global prompt file not found: %s", cfg.prompts.global_prompt
+                "Global prompt file not found: %s", prompts.global_prompt
             )
 
     # Layer 2: Stage prompt
@@ -292,7 +298,7 @@ def assemble_prompt(
         recent = get_comments_since(comments, last_ts)
 
     # Load lifecycle template (required)
-    lifecycle_template = load_prompt_file(cfg.prompts.lifecycle_prompt, workflow_dir)
+    lifecycle_template = load_prompt_file(prompts.lifecycle_prompt, workflow_dir)
 
     lifecycle = build_lifecycle_section(
         lifecycle_template=lifecycle_template,

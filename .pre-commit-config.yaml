@@ -1,0 +1,73 @@
+# Pre-commit hooks for Stokowski
+# Install: pip install pre-commit && pre-commit install
+
+repos:
+  # Tests unitaires (pytest) : doit passer avant chaque commit
+  - repo: local
+    hooks:
+      - id: tests
+        name: Run tests (pytest)
+        entry: bash -c "python -m pytest tests/ -v --tb=short"
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+  # Bandit : détection de vulnérabilités de sécurité
+  - repo: https://github.com/PyCQA/bandit
+    rev: "1.9.3"
+    hooks:
+      - id: bandit
+        args: ["-c", "pyproject.toml"]
+        additional_dependencies: ["bandit[toml]"]
+        exclude: ^(tests/|docs/|\.claude/|openspec/)
+
+  # pip-audit : vulnérabilités connues dans les dépendances Python
+  - repo: https://github.com/pypa/pip-audit
+    rev: v2.10.0
+    hooks:
+      - id: pip-audit
+        args: [--desc]
+
+  # Ruff : lint style/qualité + format (remplace flake8, black, isort)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.2
+    hooks:
+      - id: ruff-check
+        name: ruff check (lint)
+        args: [--fix]
+        exclude: ^(\.claude/|openspec/changes/)
+      - id: ruff-format
+        name: ruff format
+        exclude: ^(\.claude/|openspec/changes/)
+
+  # Pyright : vérification de types
+  - repo: local
+    hooks:
+      - id: pyright
+        name: Run pyright (type checker)
+        entry: pyright
+        language: system
+        pass_filenames: false
+        files: ^(stokowski/|tests/)
+
+  # Vérification syntaxe YAML
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+        exclude: ^openspec/changes/
+      - id: check-toml
+      - id: check-json
+        exclude: ^\.claude/
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+  # Vérification des messages de commit
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.1.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
