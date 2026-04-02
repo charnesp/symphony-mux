@@ -868,7 +868,7 @@ stokowski --dry-run
 
 ```bash
 # With pip (from git)
-pip install git+https://github.com/charnesp/stokowski.git#egg=stokowski[web]
+pip install git+https://github.com/charnesp/stokowski.git#egg=stokowski
 
 # With uv tool install (no virtual environment needed)
 uv tool install git+https://github.com/charnesp/stokowski.git#egg=stokowski
