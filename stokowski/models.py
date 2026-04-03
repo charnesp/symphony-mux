@@ -47,10 +47,10 @@ class RunAttempt:
     last_event: str | None = None
     last_message: str = ""
     completed_at: datetime | None = None
-    state_name: str | None = None       # current internal state machine state
-    workflow_name: str | None = None     # workflow name for this issue
-    full_output: str = ""                # complete agent output for report extraction
-    previous_error: str | None = None    # error from previous attempt (for retry feedback)
+    state_name: str | None = None  # current internal state machine state
+    workflow_name: str | None = None  # workflow name for this issue
+    full_output: str = ""  # complete agent output for report extraction
+    previous_error: str | None = None  # error from previous attempt (for retry feedback)
 
 
 @dataclass

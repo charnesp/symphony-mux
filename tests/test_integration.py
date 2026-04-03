@@ -6,16 +6,11 @@ These tests validate:
 - Backwards compatibility with single-workflow configs
 """
 
-import pytest
-import tempfile
-from pathlib import Path
 from dataclasses import dataclass, field
 
+import pytest
+
 from stokowski.config import (
-    ServiceConfig,
-    WorkflowConfig,
-    StateConfig,
-    PromptsConfig,
     parse_workflow_file,
 )
 
@@ -23,6 +18,7 @@ from stokowski.config import (
 @dataclass
 class MockIssue:
     """Mock Linear issue."""
+
     id: str = "issue-1"
     identifier: str = "TEST-1"
     title: str = "Test"
@@ -284,11 +280,8 @@ workflows:
 
         # Any issue without matching labels will fail routing
         issue = MockIssue(labels=["anything"])
-        try:
+        with pytest.raises(ValueError):
             cfg.get_workflow_for_issue(issue)
-            assert False, "Should raise ValueError"
-        except ValueError:
-            pass  # Expected
 
 
 class TestWorkflowPersistence:
@@ -354,7 +347,6 @@ class TestWorkflowPersistence:
     async def test_crash_recovery_legacy_default_to_explicit_default(self, tmp_path):
         """Crash recovery: legacy 'default' workflow name routes to explicit default."""
         from stokowski.orchestrator import Orchestrator
-        from stokowski.config import WorkflowDefinition, ServiceConfig
 
         yaml_content = """
 tracker:

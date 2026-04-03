@@ -8,14 +8,14 @@ Specification for the Mux agent runner integration in Stokowski.
 
 ### FR-1: Runner Dispatch
 
-**Given** a workflow.yaml with `runner: mux` in a state configuration  
-**When** the orchestrator dispatches an agent for that state  
+**Given** a workflow.yaml with `runner: mux` in a state configuration
+**When** the orchestrator dispatches an agent for that state
 **Then** the Mux runner is invoked instead of Claude or Codex
 
 ### FR-2: CLI Invocation
 
-**Given** a task to execute  
-**When** the Mux runner starts  
+**Given** a task to execute
+**When** the Mux runner starts
 **Then** it invokes: `mux exec -p "<prompt>" --json [options]`
 
 Options supported:
@@ -25,8 +25,8 @@ Options supported:
 
 ### FR-3: NDJSON Stream Parsing
 
-**Given** Mux outputs NDJSON events to stdout  
-**When** streaming output  
+**Given** Mux outputs NDJSON events to stdout
+**When** streaming output
 **Then** the runner parses and processes each event
 
 Supported event types:
@@ -37,8 +37,8 @@ Supported event types:
 
 ### FR-4: Status Reporting
 
-**Given** Mux execution completes  
-**When** parsing the result event or exit code  
+**Given** Mux execution completes
+**When** parsing the result event or exit code
 **Then** the runner updates RunAttempt with:
 - `status`: `succeeded`, `failed`, `timed_out`, or `stalled`
 - `error`: Error message if failed
@@ -48,8 +48,8 @@ Supported event types:
 
 ### FR-5: Hook Integration
 
-**Given** hooks are configured in workflow.yaml  
-**When** running Mux agent  
+**Given** hooks are configured in workflow.yaml
+**When** running Mux agent
 **Then** all hooks execute:
 - `before_run`: Before starting Mux
 - `after_run`: After Mux completes

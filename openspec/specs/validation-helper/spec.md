@@ -35,4 +35,3 @@ All agent runners (claude, codex, mux) SHALL use identical validation behavior v
 #### Scenario: Mux runner uses shared helper
 - **WHEN** `run_mux_turn()` completes successfully
 - **THEN** it SHALL call `_finalize_attempt()` to set final status
-

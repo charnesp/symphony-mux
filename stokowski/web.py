@@ -11,8 +11,8 @@ if TYPE_CHECKING:
 try:
     from fastapi import FastAPI
     from fastapi.responses import HTMLResponse, JSONResponse
-except ImportError:
-    raise ImportError("Install web extras: pip install stokowski[web]")
+except ImportError as e:
+    raise ImportError("Install web extras: pip install stokowski[web]") from e
 
 DASHBOARD_HTML = """<!DOCTYPE html>
 <html lang="en">

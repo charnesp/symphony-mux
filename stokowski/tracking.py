@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger("stokowski.tracking")
@@ -19,7 +20,7 @@ def make_state_comment(state: str, run: int = 1, workflow: str | None = None) ->
     payload: dict[str, Any] = {
         "state": state,
         "run": run,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     if workflow:
         payload["workflow"] = workflow
@@ -42,7 +43,7 @@ def make_gate_comment(
         "state": state,
         "status": status,
         "run": run,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     if rework_to:
         payload["rework_to"] = rework_to
@@ -58,10 +59,7 @@ def make_gate_comment(
     elif status == "approved":
         human = f"**[Stokowski]** Gate **{state}** approved."
     elif status == "rework":
-        human = (
-            f"**[Stokowski]** Rework requested at **{state}**. "
-            f"Returning to: **{rework_to}**"
-        )
+        human = f"**[Stokowski]** Rework requested at **{state}**. Returning to: **{rework_to}**"
         if run > 1:
             human += f" (run {run})"
     elif status == "escalated":
@@ -130,9 +128,7 @@ def get_last_tracking_timestamp(comments: list[dict]) -> str | None:
     return latest_ts
 
 
-def get_comments_since(
-    comments: list[dict], since_timestamp: str | None
-) -> list[dict]:
+def get_comments_since(comments: list[dict], since_timestamp: str | None) -> list[dict]:
     """Filter comments to only those after a given timestamp.
 
     Returns comments that are NOT stokowski tracking comments and
@@ -141,12 +137,8 @@ def get_comments_since(
     result = []
     since_dt = None
     if since_timestamp:
-        try:
-            since_dt = datetime.fromisoformat(
-                since_timestamp.replace("Z", "+00:00")
-            )
-        except (ValueError, AttributeError):
-            pass
+        with contextlib.suppress(ValueError, AttributeError):
+            since_dt = datetime.fromisoformat(since_timestamp.replace("Z", "+00:00"))
 
     for comment in comments:
         body = comment.get("body", "")
@@ -157,9 +149,7 @@ def get_comments_since(
             created = comment.get("createdAt", "")
             if created:
                 try:
-                    created_dt = datetime.fromisoformat(
-                        created.replace("Z", "+00:00")
-                    )
+                    created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
                     if created_dt <= since_dt:
                         continue
                 except (ValueError, AttributeError):

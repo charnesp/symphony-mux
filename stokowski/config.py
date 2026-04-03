@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -77,6 +76,7 @@ class ServerConfig:
 @dataclass
 class LinearStatesConfig:
     """Maps logical state names to actual Linear state names."""
+
     todo: str = "Todo"
     active: str = "In Progress"
     review: str = "Human Review"
@@ -96,6 +96,7 @@ class PromptsConfig:
             lifecycle context (report requirements, rework info, transitions).
             Defaults to "prompts/lifecycle.md".
     """
+
     global_prompt: str | None = None
     lifecycle_prompt: str = "prompts/lifecycle.md"
 
@@ -111,6 +112,7 @@ class WorkflowConfig:
         states: State machine definition for this workflow.
         prompts: Prompt file references for this workflow.
     """
+
     name: str = ""
     label: str | None = None
     default: bool = False
@@ -121,10 +123,11 @@ class WorkflowConfig:
 @dataclass
 class StateConfig:
     """A single state in the state machine."""
+
     name: str = ""
-    type: str = "agent"              # "agent", "gate", "terminal"
-    prompt: str | None = None        # path to prompt .md file
-    linear_state: str = "active"     # key into LinearStatesConfig
+    type: str = "agent"  # "agent", "gate", "terminal"
+    prompt: str | None = None  # path to prompt .md file
+    linear_state: str = "active"  # key into LinearStatesConfig
     runner: str = "claude"
     model: str | None = None
     max_turns: int | None = None
@@ -133,8 +136,8 @@ class StateConfig:
     session: str = "inherit"
     permission_mode: str | None = None
     allowed_tools: list[str] | None = None
-    rework_to: str | None = None     # gate only
-    max_rework: int | None = None    # gate only
+    rework_to: str | None = None  # gate only
+    max_rework: int | None = None  # gate only
     transitions: dict[str, str] = field(default_factory=dict)
     hooks: HooksConfig | None = None
 
@@ -264,11 +267,11 @@ class ServiceConfig:
         # If using multi-workflow mode (workflows: section exists)
         if self.workflows:
             # First match wins (YAML order)
-            for name, wf in self.workflows.items():
+            for _name, wf in self.workflows.items():
                 if wf.label and wf.label in labels:
                     return wf
             # Fallback to default workflow
-            for name, wf in self.workflows.items():
+            for _name, wf in self.workflows.items():
                 if wf.default:
                     return wf
             raise ValueError(
@@ -379,11 +382,17 @@ def merge_state_config(
     claude = ClaudeConfig(
         command=root_claude.command,
         permission_mode=state.permission_mode or root_claude.permission_mode,
-        allowed_tools=state.allowed_tools if state.allowed_tools is not None else root_claude.allowed_tools,
+        allowed_tools=state.allowed_tools
+        if state.allowed_tools is not None
+        else root_claude.allowed_tools,
         model=state.model or root_claude.model,
         max_turns=state.max_turns if state.max_turns is not None else root_claude.max_turns,
-        turn_timeout_ms=state.turn_timeout_ms if state.turn_timeout_ms is not None else root_claude.turn_timeout_ms,
-        stall_timeout_ms=state.stall_timeout_ms if state.stall_timeout_ms is not None else root_claude.stall_timeout_ms,
+        turn_timeout_ms=state.turn_timeout_ms
+        if state.turn_timeout_ms is not None
+        else root_claude.turn_timeout_ms,
+        stall_timeout_ms=state.stall_timeout_ms
+        if state.stall_timeout_ms is not None
+        else root_claude.stall_timeout_ms,
         append_system_prompt=root_claude.append_system_prompt,
     )
     hooks = state.hooks if state.hooks is not None else root_hooks
@@ -539,14 +548,20 @@ def parse_workflow_file(path: str | Path) -> WorkflowDefinition:
     return WorkflowDefinition(config=cfg, prompt_template=prompt_template)
 
 
-def validate_config(cfg: ServiceConfig) -> list[str]:
-    """Validate state machine config for dispatch readiness. Returns list of errors."""
+def validate_config(cfg: ServiceConfig, skip_secrets_check: bool = False) -> list[str]:
+    """Validate state machine config for dispatch readiness. Returns list of errors.
+
+    Args:
+        cfg: The service configuration to validate.
+        skip_secrets_check: If True, skip validation of API keys and secrets.
+            Useful for CI/testing where secrets are not available.
+    """
     errors: list[str] = []
 
     # Basic tracker checks
     if cfg.tracker.kind != "linear":
         errors.append(f"Unsupported tracker kind: {cfg.tracker.kind}")
-    if not cfg.resolved_api_key():
+    if not skip_secrets_check and not cfg.resolved_api_key():
         errors.append("Missing tracker API key (set LINEAR_API_KEY or tracker.api_key)")
     if not cfg.tracker.project_slug:
         errors.append("Missing tracker.project_slug")
@@ -583,8 +598,7 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
                 errors.append(f"Gate state '{name}' is missing 'rework_to' field")
             elif sc.rework_to not in all_state_names:
                 errors.append(
-                    f"Gate state '{name}' rework_to target '{sc.rework_to}' "
-                    f"is not a defined state"
+                    f"Gate state '{name}' rework_to target '{sc.rework_to}' is not a defined state"
                 )
             # Gates must have approve transition
             if "approve" not in sc.transitions:
@@ -604,8 +618,7 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
         for trigger, target in sc.transitions.items():
             if target not in all_state_names:
                 errors.append(
-                    f"State '{name}' transition '{trigger}' points to "
-                    f"unknown state '{target}'"
+                    f"State '{name}' transition '{trigger}' points to unknown state '{target}'"
                 )
 
     # Only require root agent/terminal states in legacy mode
@@ -613,7 +626,9 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
         if not has_agent:
             errors.append("No agent states defined (need at least one state with type 'agent')")
         if not has_terminal:
-            errors.append("No terminal states defined (need at least one state with type 'terminal')")
+            errors.append(
+                "No terminal states defined (need at least one state with type 'terminal')"
+            )
 
     # Warn about unreachable states (non-entry states that no transition points to)
     entry = cfg.entry_state
@@ -644,7 +659,9 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
                 label_to_workflows.setdefault(wf.label, []).append(wf_name)
         for label, wf_names in label_to_workflows.items():
             if len(wf_names) > 1:
-                errors.append(f"Multiple workflows have the same label '{label}': {', '.join(wf_names)}")
+                errors.append(
+                    f"Multiple workflows have the same label '{label}': {', '.join(wf_names)}"
+                )
 
         # Validate each workflow's state machine
         for wf_name, wf in cfg.workflows.items():
@@ -659,24 +676,32 @@ def validate_config(cfg: ServiceConfig) -> list[str]:
             for state_name, sc in wf.states.items():
                 # Check type
                 if sc.type not in ("agent", "gate", "terminal"):
-                    errors.append(f"Workflow '{wf_name}' state '{state_name}' has invalid type: {sc.type}")
+                    errors.append(
+                        f"Workflow '{wf_name}' state '{state_name}' has invalid type: {sc.type}"
+                    )
                     continue
 
                 if sc.type == "agent":
                     wf_has_agent = True
                     if not sc.prompt:
-                        errors.append(f"Workflow '{wf_name}' agent state '{state_name}' is missing 'prompt' field")
+                        errors.append(
+                            f"Workflow '{wf_name}' agent state '{state_name}' is missing 'prompt' field"
+                        )
 
                 elif sc.type == "gate":
                     if not sc.rework_to:
-                        errors.append(f"Workflow '{wf_name}' gate state '{state_name}' is missing 'rework_to' field")
+                        errors.append(
+                            f"Workflow '{wf_name}' gate state '{state_name}' is missing 'rework_to' field"
+                        )
                     elif sc.rework_to not in wf_state_names:
                         errors.append(
                             f"Workflow '{wf_name}' gate state '{state_name}' rework_to target '{sc.rework_to}' "
                             f"is not a defined state"
                         )
                     if "approve" not in sc.transitions:
-                        errors.append(f"Workflow '{wf_name}' gate state '{state_name}' is missing 'approve' transition")
+                        errors.append(
+                            f"Workflow '{wf_name}' gate state '{state_name}' is missing 'approve' transition"
+                        )
 
                 elif sc.type == "terminal":
                     wf_has_terminal = True

@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from jinja2 import BaseLoader, Environment, Undefined
+from jinja2 import BaseLoader, Environment, Undefined, select_autoescape
 
 from .config import LinearStatesConfig, PromptsConfig, ServiceConfig, StateConfig
 from .models import Issue
@@ -47,9 +47,14 @@ def render_template(template_str: str, context: dict[str, Any]) -> str:
     """Render a Jinja2 template string with the given context.
 
     Uses a permissive undefined handler so missing variables render as
-    empty strings rather than raising errors.
+    empty strings rather than raising errors. Autoescape is enabled
+    for security (templates render prompts, not HTML).
     """
-    env = Environment(loader=BaseLoader(), undefined=_SilentUndefined)
+    env = Environment(
+        loader=BaseLoader(),
+        undefined=_SilentUndefined,
+        autoescape=select_autoescape(),
+    )
     template = env.from_string(template_str)
     return template.render(**context)
 
@@ -272,9 +277,7 @@ def assemble_prompt(
             rendered = render_template(raw, context)
             parts.append(rendered)
         except FileNotFoundError:
-            log.warning(
-                "Global prompt file not found: %s", prompts.global_prompt
-            )
+            log.warning("Global prompt file not found: %s", prompts.global_prompt)
 
     # Layer 2: Stage prompt
     if state_cfg.prompt:

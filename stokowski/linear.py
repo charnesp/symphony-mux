@@ -248,9 +248,7 @@ class LinearClient:
 
         return issues
 
-    async def fetch_issue_states_by_ids(
-        self, issue_ids: list[str]
-    ) -> dict[str, str]:
+    async def fetch_issue_states_by_ids(self, issue_ids: list[str]) -> dict[str, str]:
         """Fetch current states for given issue IDs. Returns {id: state_name}."""
         if not issue_ids:
             return {}
@@ -262,9 +260,7 @@ class LinearClient:
                 result[node["id"]] = node["state"]["name"]
         return result
 
-    async def fetch_issues_by_states(
-        self, project_slug: str, states: list[str]
-    ) -> list[Issue]:
+    async def fetch_issues_by_states(self, project_slug: str, states: list[str]) -> list[Issue]:
         """Fetch issues in specific states (for terminal cleanup)."""
         issues: list[Issue] = []
         cursor = None
@@ -324,9 +320,7 @@ class LinearClient:
         """Move an issue to a new state by name. Returns True on success."""
         try:
             # Get team and its workflow states in one query
-            data = await self._graphql(
-                ISSUE_TEAM_AND_STATES_QUERY, {"issueId": issue_id}
-            )
+            data = await self._graphql(ISSUE_TEAM_AND_STATES_QUERY, {"issueId": issue_id})
             team = data.get("issue", {}).get("team", {})
             if not team:
                 logger.error(f"Could not find team for issue {issue_id}")
@@ -341,8 +335,7 @@ class LinearClient:
 
             if not state_id:
                 logger.error(
-                    f"State '{state_name}' not found. "
-                    f"Available: {[s.get('name') for s in states]}"
+                    f"State '{state_name}' not found. Available: {[s.get('name') for s in states]}"
                 )
                 return False
 

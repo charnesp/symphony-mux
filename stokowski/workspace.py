@@ -36,16 +36,12 @@ async def run_hook(script: str, cwd: Path, timeout_ms: int, label: str) -> bool:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_ms / 1000
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_ms / 1000)
         if proc.returncode != 0:
-            logger.error(
-                f"hook={label} failed rc={proc.returncode} stderr={stderr.decode()[:500]}"
-            )
+            logger.error(f"hook={label} failed rc={proc.returncode} stderr={stderr.decode()[:500]}")
             return False
         return True
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(f"hook={label} timed out after {timeout_ms}ms")
         proc.kill()
         return False

@@ -123,13 +123,13 @@ def test_build_mux_args_basic():
     """Build mux exec arguments with minimal parameters."""
     from stokowski.runner import build_mux_args
     from pathlib import Path
-    
+
     args = build_mux_args(
         model=None,
         prompt="Test prompt",
         workspace_path=Path("/tmp/workspace"),
     )
-    
+
     assert "mux" in args[0]
     assert "exec" in args
     assert "-p" in args
@@ -161,16 +161,16 @@ def build_mux_args(
 ) -> list[str]:
     """Build the mux exec CLI argument list."""
     args = ["mux", "exec", "-p", prompt]
-    
+
     if model:
         args.extend(["--model", model])
-    
+
     if agent_id:
         args.extend(["--agent-id", agent_id])
-    
+
     if timeout_ms:
         args.extend(["--timeout", str(timeout_ms // 1000)])
-    
+
     return args
 ```
 
@@ -216,10 +216,10 @@ async def test_run_turn_dispatches_to_mux():
     """Verify run_turn dispatches to mux runner."""
     from stokowski.runner import run_turn
     from unittest.mock import patch
-    
+
     with patch("stokowski.runner.run_mux_turn") as mock_mux:
         mock_mux.return_value = RunAttempt(session_id="test")
-        
+
         # This should fail until we add the mux case
         await run_turn(
             runner_type="mux",
@@ -230,7 +230,7 @@ async def test_run_turn_dispatches_to_mux():
             issue=Issue(title="", identifier="TEST-1"),
             attempt=RunAttempt(),
         )
-        
+
         mock_mux.assert_called_once()
 ```
 

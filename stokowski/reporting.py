@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -36,7 +36,7 @@ def extract_report(agent_output: str) -> str | None:
         return None
     content = match.group(1).strip()
     # Convert escaped newlines to actual newlines
-    content = content.replace('\\n', '\n')
+    content = content.replace("\\n", "\n")
     return content
 
 
@@ -78,7 +78,7 @@ def format_report_comment(
         "type": "report",
         "state": state_name,
         "run": run,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "has_approval_section": has_approval_section(report_content),
         "is_gate": is_gate,
     }
@@ -97,17 +97,19 @@ def format_report_comment(
     ]
 
     if is_gate:
-        lines.extend([
-            "",
-            "---",
-            "",
-            "🚪 **Gate Review Required**",
-            "",
-            "This work is awaiting human review. Please:",
-            "- Review the items listed above",
-            "- Use Linear state transitions to approve or request rework",
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "---",
+                "",
+                "🚪 **Gate Review Required**",
+                "",
+                "This work is awaiting human review. Please:",
+                "- Review the items listed above",
+                "- Use Linear state transitions to approve or request rework",
+                "",
+            ]
+        )
 
     return "\n".join(lines)
 
@@ -133,7 +135,7 @@ def format_no_report_comment(
         "type": "report",
         "state": state_name,
         "run": run,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "has_approval_section": False,
         "is_gate": False,
         "note": "No stokowski:report tag found in agent output",

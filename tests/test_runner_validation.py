@@ -1,10 +1,9 @@
 """Tests for runner validation logic."""
 
 import pytest
-from datetime import datetime, timezone
 
-from stokowski.runner import validate_agent_output, _finalize_attempt
 from stokowski.models import RunAttempt
+from stokowski.runner import _finalize_attempt, validate_agent_output
 
 
 class TestValidateAgentOutput:
@@ -131,7 +130,9 @@ class TestFinalizeAttempt:
 
     def test_failed_exit_code(self, attempt):
         """Non-zero exit code should fail regardless of report."""
-        _finalize_attempt(attempt, returncode=1, stderr_output="Process error", issue_identifier="TEST-123")
+        _finalize_attempt(
+            attempt, returncode=1, stderr_output="Process error", issue_identifier="TEST-123"
+        )
 
         assert attempt.status == "failed"
         assert "Exit code 1" in attempt.error
@@ -157,7 +158,9 @@ class TestFinalizeAttempt:
 
     def test_negative_exit_code(self, attempt):
         """Negative exit code (e.g., killed by signal) should fail."""
-        _finalize_attempt(attempt, returncode=-9, stderr_output="Killed", issue_identifier="TEST-123")
+        _finalize_attempt(
+            attempt, returncode=-9, stderr_output="Killed", issue_identifier="TEST-123"
+        )
 
         assert attempt.status == "failed"
         assert "Exit code -9" in attempt.error

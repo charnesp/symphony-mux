@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import select
@@ -13,6 +14,15 @@ import termios
 import threading
 import tty
 from pathlib import Path
+
+from rich.console import Console
+from rich.live import Live
+from rich.logging import RichHandler
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+from .orchestrator import Orchestrator
 
 
 def _load_dotenv():
@@ -29,21 +39,12 @@ def _load_dotenv():
             key = key.strip()
             value = value.strip()
             # Remove surrounding quotes if present
-            if (value.startswith('"') and value.endswith('"')) or \
-               (value.startswith("'") and value.endswith("'")):
+            if (value.startswith('"') and value.endswith('"')) or (
+                value.startswith("'") and value.endswith("'")
+            ):
                 value = value[1:-1]
             os.environ[key] = value
 
-
-from rich.columns import Columns
-from rich.console import Console
-from rich.live import Live
-from rich.logging import RichHandler
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
-
-from .orchestrator import Orchestrator
 
 console = Console()
 
@@ -62,6 +63,7 @@ def setup_logging(verbose: bool = False):
 
 # ── Update check ───────────────────────────────────────────────────────────
 
+
 async def check_for_updates():
     """Check if a newer Stokowski release is available on GitHub."""
     global _update_message
@@ -75,6 +77,7 @@ async def check_for_updates():
 
     try:
         import httpx
+
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 "https://api.github.com/repos/Sugar-Coffee/stokowski/releases/latest",
@@ -86,11 +89,10 @@ async def check_for_updates():
             if not latest_tag:
                 return
             if _parse_ver(latest_tag) > _parse_ver(__version__):
-                _update_message = (
-                    f"Stokowski {latest_tag} available (you have {__version__})"
-                )
+                _update_message = f"Stokowski {latest_tag} available (you have {__version__})"
     except Exception:
-        pass  # Update checks are best-effort
+        # Update checks are best-effort
+        logging.debug("Update check failed", exc_info=True)
 
 
 # ── Keyboard handler ────────────────────────────────────────────────────────
@@ -107,15 +109,15 @@ HELP_TEXT = """
 
 def print_status(orch: Orchestrator):
     snap = orch.get_state_snapshot()
-    running  = snap["counts"]["running"]
+    running = snap["counts"]["running"]
     retrying = snap["counts"]["retrying"]
     total_tok = snap["totals"]["total_tokens"]
     secs = snap["totals"]["seconds_running"]
 
     table = Table(box=None, padding=(0, 2), show_header=True, header_style="dim")
-    table.add_column("Issue",  style="cyan",  width=12)
+    table.add_column("Issue", style="cyan", width=12)
     table.add_column("Status", style="green", width=12)
-    table.add_column("Turns",  justify="right", width=6)
+    table.add_column("Turns", justify="right", width=6)
     table.add_column("Tokens", justify="right", width=10)
     table.add_column("Last activity", style="dim")
 
@@ -131,20 +133,23 @@ def print_status(orch: Orchestrator):
         table.add_row(
             r["issue_identifier"],
             f"[blue]retry #{r['attempt']}[/blue]",
-            "—", "—",
+            "—",
+            "—",
             r["error"] or "waiting",
         )
     if not snap["running"] and not snap["retrying"]:
         table.add_row("—", "idle", "—", "—", "no active agents")
 
     console.print()
-    console.print(Panel(
-        table,
-        title=f"[bold]Stokowski Status[/bold]  "
-              f"[dim]running={running}  retrying={retrying}  "
-              f"tokens={total_tok:,}  uptime={secs:.0f}s[/dim]",
-        border_style="yellow",
-    ))
+    console.print(
+        Panel(
+            table,
+            title=f"[bold]Stokowski Status[/bold]  "
+            f"[dim]running={running}  retrying={retrying}  "
+            f"tokens={total_tok:,}  uptime={secs:.0f}s[/dim]",
+            border_style="yellow",
+        )
+    )
     console.print()
 
 
@@ -189,17 +194,16 @@ class KeyboardHandler:
             console.print(HELP_TEXT)
         elif ch == "r":
             console.print("[dim]Forcing poll...[/dim]")
-            if hasattr(self._orch, '_stop_event'):
+            if hasattr(self._orch, "_stop_event"):
                 # Wake the poll loop early
-                self._loop.call_soon_threadsafe(
-                    lambda: self._loop.create_task(self._orch._tick())
-                )
+                self._loop.call_soon_threadsafe(lambda: self._loop.create_task(self._orch._tick()))
 
     def stop(self):
         self._stop.set()
 
 
 # ── Main orchestrator runner ─────────────────────────────────────────────────
+
 
 def _make_footer(orch: Orchestrator) -> Text:
     """Build the persistent footer line."""
@@ -243,12 +247,16 @@ async def run_orchestrator(workflow_path: str, port: int | None = None):
     _uvicorn_task = None
     if port is not None:
         try:
-            from .web import create_app
             import uvicorn
+
+            from .web import create_app
 
             app = create_app(orch)
             server_config = uvicorn.Config(
-                app, host="127.0.0.1", port=port, log_level="warning",
+                app,
+                host="127.0.0.1",
+                port=port,
+                log_level="warning",
             )
             _uvicorn_server = uvicorn.Server(server_config)
             _uvicorn_server.install_signal_handlers = lambda: None
@@ -261,11 +269,13 @@ async def run_orchestrator(workflow_path: str, port: int | None = None):
 
     await check_for_updates()
 
-    console.print(Panel(
-        f"[bold]Stokowski[/bold]  [dim]Claude Code Orchestrator[/dim]\n"
-        f"[dim]workflow:[/dim] {workflow_path}",
-        border_style="dim",
-    ))
+    console.print(
+        Panel(
+            f"[bold]Stokowski[/bold]  [dim]Claude Code Orchestrator[/dim]\n"
+            f"[dim]workflow:[/dim] {workflow_path}",
+            border_style="dim",
+        )
+    )
 
     async def _update_footer(live: Live):
         while True:
@@ -287,15 +297,14 @@ async def run_orchestrator(workflow_path: str, port: int | None = None):
             if _uvicorn_server is not None:
                 _uvicorn_server.should_exit = True
                 if _uvicorn_task is not None:
-                    try:
+                    with contextlib.suppress(TimeoutError, asyncio.CancelledError):
                         await asyncio.wait_for(_uvicorn_task, timeout=2.0)
-                    except (asyncio.TimeoutError, asyncio.CancelledError):
-                        pass
             _force_kill_children()
             console.print("[green]All agents stopped.[/green]")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
+
 
 def cli():
     parser = argparse.ArgumentParser(
@@ -308,15 +317,20 @@ def cli():
         help="Path to workflow.yaml or WORKFLOW.md (auto-detected if not specified)",
     )
     parser.add_argument(
-        "--port", type=int, default=None,
+        "--port",
+        type=int,
+        default=None,
         help="Enable web dashboard on this port",
     )
     parser.add_argument(
-        "--verbose", "-v", action="store_true",
+        "--verbose",
+        "-v",
+        action="store_true",
         help="Enable debug logging",
     )
     parser.add_argument(
-        "--dry-run", action="store_true",
+        "--dry-run",
+        action="store_true",
         help="Validate config and show candidates without dispatching",
     )
 
@@ -352,11 +366,13 @@ def cli():
 
 def _force_kill_children():
     """Kill any lingering claude -p processes."""
-    import subprocess
+    import subprocess  # nosec B404
+
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B607, B603
             ["pgrep", "-f", "claude.*-p.*--output-format.*stream-json"],
-            capture_output=True, text=True,
+            capture_output=True,
+            text=True,
         )
         for pid_str in result.stdout.strip().split("\n"):
             if pid_str.strip():
@@ -367,12 +383,13 @@ def _force_kill_children():
                     except (ProcessLookupError, PermissionError, OSError):
                         os.kill(pid, signal.SIGKILL)
                 except (ValueError, ProcessLookupError, PermissionError, OSError):
-                    pass
+                    logging.debug("Failed to kill process %s", pid_str, exc_info=True)
     except Exception:
-        pass
+        logging.debug("Force kill children failed", exc_info=True)
 
 
 # ── Dry run ───────────────────────────────────────────────────────────────────
+
 
 async def dry_run(workflow_path: str):
     from .config import parse_workflow_file, validate_config
@@ -403,12 +420,14 @@ async def dry_run(workflow_path: str):
     if cfg.states:
         console.print(f"\n  [bold]State machine[/bold] ({len(cfg.states)} states):")
         console.print(f"    Entry state: {cfg.entry_state}")
-        console.print(f"    Linear states: active={cfg.linear_states.active}, review={cfg.linear_states.review}")
+        console.print(
+            f"    Linear states: active={cfg.linear_states.active}, review={cfg.linear_states.review}"
+        )
         for name, state in cfg.states.items():
             transitions = ", ".join(f"{k}->{v}" for k, v in state.transitions.items())
             console.print(f"    {name} ({state.type}) -> {transitions or 'terminal'}")
     else:
-        console.print(f"\n  [dim]Legacy mode (no state machine)[/dim]")
+        console.print("\n  [dim]Legacy mode (no state machine)[/dim]")
 
     console.print()
 

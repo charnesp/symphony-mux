@@ -1,23 +1,23 @@
 """Tests for multi-workflow configuration support."""
 
-import pytest
 from dataclasses import dataclass
-from typing import Any
+
+import pytest
 
 from stokowski.config import (
-    ServiceConfig,
-    WorkflowConfig,
-    StateConfig,
     PromptsConfig,
+    ServiceConfig,
+    StateConfig,
+    WorkflowConfig,
     parse_workflow_file,
     validate_config,
 )
-from stokowski.models import Issue
 
 
 @dataclass
 class MockIssue:
     """Mock issue for testing."""
+
     id: str = "issue-1"
     identifier: str = "TEST-1"
     title: str = "Test Issue"
@@ -267,7 +267,7 @@ class TestDuplicateLabelValidation:
             "feature": wf2,
         }
 
-        errors = validate_config(cfg)
+        errors = validate_config(cfg, skip_secrets_check=True)
 
         expected = "Multiple workflows have the same label 'shared-label': debug, feature"
         assert expected in errors
@@ -292,7 +292,7 @@ class TestDuplicateLabelValidation:
         }
 
         # Filter to only label-related errors
-        errors = [e for e in validate_config(cfg) if "label" in e.lower()]
+        errors = [e for e in validate_config(cfg, skip_secrets_check=True) if "label" in e.lower()]
 
         assert len(errors) == 0
 
@@ -315,7 +315,7 @@ class TestDuplicateLabelValidation:
             "feature": wf2,
         }
 
-        errors = validate_config(cfg)
+        errors = validate_config(cfg, skip_secrets_check=True)
 
         # Filter to only label-related errors
         label_errors = [e for e in errors if "label" in e.lower()]
@@ -326,10 +326,14 @@ class TestDuplicateLabelValidation:
         """Empty string labels should not be considered duplicates."""
         cfg = ServiceConfig()
         cfg.workflows = {
-            "wf1": WorkflowConfig(label="", name="wf1", states={"s1": StateConfig(name="s1", type="agent")}),
-            "wf2": WorkflowConfig(label="", name="wf2", states={"s2": StateConfig(name="s2", type="agent")}),
+            "wf1": WorkflowConfig(
+                label="", name="wf1", states={"s1": StateConfig(name="s1", type="agent")}
+            ),
+            "wf2": WorkflowConfig(
+                label="", name="wf2", states={"s2": StateConfig(name="s2", type="agent")}
+            ),
         }
-        errors = validate_config(cfg)
+        errors = validate_config(cfg, skip_secrets_check=True)
         # Empty labels should be skipped, not considered duplicates
         label_errors = [e for e in errors if "label" in e.lower()]
         assert len(label_errors) == 0, f"Empty labels should not produce duplicates: {label_errors}"

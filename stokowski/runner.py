@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .config import ClaudeConfig, HooksConfig
 from .models import Issue, RunAttempt
@@ -97,9 +99,7 @@ def _finalize_attempt(
         else:
             attempt.status = "failed"
             attempt.error = f"Report validation failed: {error_msg}"
-            logger.warning(
-                f"Report validation failed for {issue_identifier}: {error_msg}"
-            )
+            logger.warning(f"Report validation failed for {issue_identifier}: {error_msg}")
     else:
         attempt.status = "failed"
         attempt.error = f"Exit code {returncode}: {stderr_output}"
@@ -111,7 +111,7 @@ def build_claude_args(
     session_id: str | None = None,
 ) -> list[str]:
     """Build the claude CLI argument list.
-    
+
     Prompt is passed via stdin to avoid argument parsing issues with special chars.
     """
     args = [claude_cfg.command]
@@ -155,7 +155,7 @@ def build_codex_args(
     workspace_path: Path,
 ) -> list[str]:
     """Build the codex CLI argument list.
-    
+
     Prompt is passed via stdin to avoid argument parsing issues with special chars.
     """
     args = ["codex", "--quiet"]
@@ -184,10 +184,7 @@ async def run_codex_turn(
     """
     args = build_codex_args(model, workspace_path)
 
-    logger.info(
-        f"Launching codex issue={issue.identifier} "
-        f"turn={attempt.turn_count + 1}"
-    )
+    logger.info(f"Launching codex issue={issue.identifier} turn={attempt.turn_count + 1}")
 
     # Run before_run hook
     if hooks_cfg.before_run:
@@ -202,9 +199,9 @@ async def run_codex_turn(
             return attempt
 
     attempt.status = "streaming"
-    attempt.started_at = attempt.started_at or datetime.now(timezone.utc)
+    attempt.started_at = attempt.started_at or datetime.now(UTC)
     attempt.turn_count += 1
-    attempt.last_event_at = datetime.now(timezone.utc)
+    attempt.last_event_at = datetime.now(UTC)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -217,13 +214,13 @@ async def run_codex_turn(
             limit=10 * 1024 * 1024,  # 10MB line buffer (default 64KB)
             env=env,
         )
-        
+
         # Write prompt to stdin (avoids argument parsing issues)
         proc.stdin.write(prompt.encode())
         await proc.stdin.drain()
         proc.stdin.close()
         await proc.stdin.wait_closed()
-        
+
         if on_pid and proc.pid:
             on_pid(proc.pid, True)
     except FileNotFoundError:
@@ -245,7 +242,7 @@ async def run_codex_turn(
             if not line:
                 break
             last_activity = loop.time()
-            attempt.last_event_at = datetime.now(timezone.utc)
+            attempt.last_event_at = datetime.now(UTC)
             line_str = line.decode().strip()
             if line_str:
                 output_lines.append(line_str)
@@ -258,8 +255,7 @@ async def run_codex_turn(
             elapsed = loop.time() - last_activity
             if stall_timeout_s > 0 and elapsed > stall_timeout_s:
                 logger.warning(
-                    f"Codex stall detected issue={issue.identifier} "
-                    f"elapsed={elapsed:.0f}s"
+                    f"Codex stall detected issue={issue.identifier} elapsed={elapsed:.0f}s"
                 )
                 proc.kill()
                 attempt.status = "stalled"
@@ -289,14 +285,12 @@ async def run_codex_turn(
                 try:
                     output_lines = reader.result()
                 except Exception:
-                    pass
+                    logger.debug("Failed to get reader result", exc_info=True)
 
         for task in pending:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     except Exception as e:
         logger.error(f"Codex runner error issue={issue.identifier}: {e}")
@@ -314,7 +308,7 @@ async def run_codex_turn(
         try:
             stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5)
             stderr_output = stderr_bytes.decode()[:500]
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             pass
     _finalize_attempt(attempt, proc.returncode, stderr_output, issue.identifier)
 
@@ -322,18 +316,13 @@ async def run_codex_turn(
     if hooks_cfg.after_run:
         from .workspace import run_hook
 
-        await run_hook(
-            hooks_cfg.after_run, workspace_path, hooks_cfg.timeout_ms, "after_run"
-        )
+        await run_hook(hooks_cfg.after_run, workspace_path, hooks_cfg.timeout_ms, "after_run")
 
     # Unregister PID
     if on_pid and proc.pid:
         on_pid(proc.pid, False)
 
-    logger.info(
-        f"Codex turn complete issue={issue.identifier} "
-        f"status={attempt.status}"
-    )
+    logger.info(f"Codex turn complete issue={issue.identifier} status={attempt.status}")
 
     return attempt
 
@@ -350,9 +339,7 @@ async def run_agent_turn(
     env: dict[str, str] | None = None,
 ) -> RunAttempt:
     """Run a single Claude Code turn. Returns updated RunAttempt."""
-    args = build_claude_args(
-        claude_cfg, workspace_path, attempt.session_id
-    )
+    args = build_claude_args(claude_cfg, workspace_path, attempt.session_id)
 
     logger.info(
         f"Launching claude issue={issue.identifier} "
@@ -373,9 +360,9 @@ async def run_agent_turn(
             return attempt
 
     attempt.status = "streaming"
-    attempt.started_at = attempt.started_at or datetime.now(timezone.utc)
+    attempt.started_at = attempt.started_at or datetime.now(UTC)
     attempt.turn_count += 1
-    attempt.last_event_at = datetime.now(timezone.utc)
+    attempt.last_event_at = datetime.now(UTC)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -388,13 +375,13 @@ async def run_agent_turn(
             limit=10 * 1024 * 1024,  # 10MB line buffer (default 64KB)
             env=env,
         )
-        
+
         # Write prompt to stdin (avoids argument parsing issues)
         proc.stdin.write(prompt.encode())
         await proc.stdin.drain()
         proc.stdin.close()
         await proc.stdin.wait_closed()
-        
+
         if on_pid and proc.pid:
             on_pid(proc.pid, True)
     except FileNotFoundError:
@@ -417,7 +404,7 @@ async def run_agent_turn(
             if not line:
                 break
             last_activity = loop.time()
-            attempt.last_event_at = datetime.now(timezone.utc)
+            attempt.last_event_at = datetime.now(UTC)
 
             line_str = line.decode().strip()
             output_lines.append(line_str)
@@ -431,17 +418,16 @@ async def run_agent_turn(
 
             _process_event(event, attempt, on_event, issue.identifier)
         attempt.full_output = "\n".join(output_lines)
-        logger.debug(f"Captured full_output for {issue.identifier}: {len(attempt.full_output)} chars")
+        logger.debug(
+            f"Captured full_output for {issue.identifier}: {len(attempt.full_output)} chars"
+        )
 
     async def stall_monitor():
         while proc.returncode is None:
             await asyncio.sleep(min(stall_timeout_s / 4, 30))
             elapsed = loop.time() - last_activity
             if stall_timeout_s > 0 and elapsed > stall_timeout_s:
-                logger.warning(
-                    f"Stall detected issue={issue.identifier} "
-                    f"elapsed={elapsed:.0f}s"
-                )
+                logger.warning(f"Stall detected issue={issue.identifier} elapsed={elapsed:.0f}s")
                 proc.kill()
                 attempt.status = "stalled"
                 attempt.error = f"No output for {elapsed:.0f}s"
@@ -470,10 +456,8 @@ async def run_agent_turn(
 
         for task in pending:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     except Exception as e:
         logger.error(f"Runner error issue={issue.identifier}: {e}")
@@ -488,7 +472,7 @@ async def run_agent_turn(
         try:
             stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5)
             stderr_output = stderr_bytes.decode()[:500]
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             pass
     _finalize_attempt(attempt, proc.returncode, stderr_output, issue.identifier)
 
@@ -496,9 +480,7 @@ async def run_agent_turn(
     if hooks_cfg.after_run:
         from .workspace import run_hook
 
-        await run_hook(
-            hooks_cfg.after_run, workspace_path, hooks_cfg.timeout_ms, "after_run"
-        )
+        await run_hook(hooks_cfg.after_run, workspace_path, hooks_cfg.timeout_ms, "after_run")
 
     # Unregister PID
     if on_pid and proc.pid:
@@ -533,8 +515,7 @@ def _process_event(
             attempt.input_tokens = usage.get("input_tokens", attempt.input_tokens)
             attempt.output_tokens = usage.get("output_tokens", attempt.output_tokens)
             attempt.total_tokens = (
-                usage.get("total_tokens", 0)
-                or attempt.input_tokens + attempt.output_tokens
+                usage.get("total_tokens", 0) or attempt.input_tokens + attempt.output_tokens
             )
         # Extract result text for last_message
         result_text = event.get("result", "")
@@ -562,13 +543,12 @@ def _process_event(
         on_event(identifier, event_type, event)
 
 
-
 def build_mux_args(
     model: str | None,
     workspace_path: Path,
 ) -> list[str]:
     """Build the mux run CLI argument list.
-    
+
     Uses --quiet mode for cleaner output.
     Prompt is passed via stdin to avoid argument parsing issues with special chars.
     """
@@ -603,10 +583,9 @@ async def run_mux_turn(
     )
 
     logger.info(
-        f"Launching mux issue={issue.identifier} "
-        f"turn={attempt.turn_count + 1} model={model}"
+        f"Launching mux issue={issue.identifier} turn={attempt.turn_count + 1} model={model}"
     )
-    logger.info(f"MUX PROMPT for {issue.identifier}:\n{'='*60}\n{prompt}\n{'='*60}")
+    logger.info(f"MUX PROMPT for {issue.identifier}:\n{'=' * 60}\n{prompt}\n{'=' * 60}")
 
     # Run before_run hook
     if hooks_cfg.before_run:
@@ -621,9 +600,9 @@ async def run_mux_turn(
             return attempt
 
     attempt.status = "streaming"
-    attempt.started_at = attempt.started_at or datetime.now(timezone.utc)
+    attempt.started_at = attempt.started_at or datetime.now(UTC)
     attempt.turn_count += 1
-    attempt.last_event_at = datetime.now(timezone.utc)
+    attempt.last_event_at = datetime.now(UTC)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -636,13 +615,13 @@ async def run_mux_turn(
             limit=10 * 1024 * 1024,
             env=env,
         )
-        
+
         # Write prompt to stdin (avoids argument parsing issues)
         proc.stdin.write(prompt.encode())
         await proc.stdin.drain()
         proc.stdin.close()
         await proc.stdin.wait_closed()
-        
+
         if on_pid and proc.pid:
             on_pid(proc.pid, True)
     except FileNotFoundError:
@@ -662,16 +641,16 @@ async def run_mux_turn(
         raw_output_lines = []
         assistant_messages = []
         # Debug: save raw NDJSON to file
-        
-        debug_ndjson_path = f"/tmp/stokowski_ndjson_{issue.identifier.replace('-', '_')}.json"
-        debug_file = open(debug_ndjson_path, "w")
+
+        debug_ndjson_path = f"/tmp/stokowski_ndjson_{issue.identifier.replace('-', '_')}.json"  # nosec B108
+        debug_file = open(debug_ndjson_path, "w")  # noqa: SIM115
         logger.info(f"Saving raw NDJSON to {debug_ndjson_path}")
         while True:
             line = await proc.stdout.readline()
             if not line:
                 break
             last_activity = loop.time()
-            attempt.last_event_at = datetime.now(timezone.utc)
+            attempt.last_event_at = datetime.now(UTC)
 
             line_str = line.decode().strip()
             if not line_str:
@@ -688,20 +667,22 @@ async def run_mux_turn(
                 # Mux JSON format: {"type": "event", "payload": {...}}
                 if isinstance(event, dict):
                     event_type = event.get("type", "")
-                    
+
                     # Debug: log event types we see
                     if event_type not in ("event", "caught-up"):
                         logger.debug(f"Mux event type: {event_type}")
-                    
+
                     # Handle Mux format: wrapped in "event" type with payload
                     if event_type == "event":
                         payload = event.get("payload", {})
                         payload_type = payload.get("type", "")
-                        
+
                         # Debug: log payload types (limit frequency)
                         if payload_type not in ("stream-delta", "runtime-status"):
-                            logger.debug(f"Mux payload type: {payload_type}, keys: {list(payload.keys())}")
-                        
+                            logger.debug(
+                                f"Mux payload type: {payload_type}, keys: {list(payload.keys())}"
+                            )
+
                         # Stream-end contains the complete message with parts
                         # Take ALL text parts and concatenate them
                         if payload_type == "stream-end":
@@ -715,16 +696,20 @@ async def run_mux_turn(
                             if text_parts:
                                 combined_text = "".join(text_parts)
                                 assistant_messages.append(combined_text)
-                                logger.info(f"Mux: Extracted {len(combined_text)} chars from {len(text_parts)} text parts")
-                        
+                                logger.info(
+                                    f"Mux: Extracted {len(combined_text)} chars from {len(text_parts)} text parts"
+                                )
+
                         # Token usage from run-complete
                     elif event_type == "run-complete":
                         usage = event.get("usage", {})
                         if usage:
                             attempt.input_tokens = usage.get("inputTokens", 0)
                             attempt.output_tokens = usage.get("outputTokens", 0)
-                            attempt.total_tokens = usage.get("inputTokens", 0) + usage.get("outputTokens", 0)
-                            
+                            attempt.total_tokens = usage.get("inputTokens", 0) + usage.get(
+                                "outputTokens", 0
+                            )
+
                     # Handle Claude Code format (for compatibility)
                     elif event_type == "assistant":
                         msg = event.get("message", {})
@@ -737,7 +722,10 @@ async def run_mux_turn(
                         if usage:
                             attempt.input_tokens = usage.get("input_tokens", 0)
                             attempt.output_tokens = usage.get("output_tokens", 0)
-                            attempt.total_tokens = usage.get("total_tokens", 0) or attempt.input_tokens + attempt.output_tokens
+                            attempt.total_tokens = (
+                                usage.get("total_tokens", 0)
+                                or attempt.input_tokens + attempt.output_tokens
+                            )
                         # Also check for direct result text
                         result_text = event.get("result", "")
                         if isinstance(result_text, str) and result_text:
@@ -751,10 +739,11 @@ async def run_mux_turn(
 
         # Store raw NDJSON for debugging, but also reconstructed readable output
         debug_file.close()
-        raw_ndjson = "\n".join(raw_output_lines)
         readable_output = "\n".join(assistant_messages)
         attempt.full_output = readable_output
-        logger.info(f"MUX OUTPUT for {issue.identifier}:\n{'='*60}\n{readable_output}\n{'='*60}")
+        logger.info(
+            f"MUX OUTPUT for {issue.identifier}:\n{'=' * 60}\n{readable_output}\n{'=' * 60}"
+        )
         logger.info(f"Raw NDJSON saved to {debug_ndjson_path} ({len(raw_output_lines)} lines)")
         return raw_output_lines
 
@@ -764,8 +753,7 @@ async def run_mux_turn(
             elapsed = loop.time() - last_activity
             if stall_timeout_s > 0 and elapsed > stall_timeout_s:
                 logger.warning(
-                    f"Mux stall detected issue={issue.identifier} "
-                    f"elapsed={elapsed:.0f}s"
+                    f"Mux stall detected issue={issue.identifier} elapsed={elapsed:.0f}s"
                 )
                 proc.kill()
                 attempt.status = "stalled"
@@ -792,10 +780,8 @@ async def run_mux_turn(
 
         for task in pending:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
     except Exception as e:
         logger.error(f"Mux runner error issue={issue.identifier}: {e}")
@@ -809,7 +795,7 @@ async def run_mux_turn(
         try:
             stderr_bytes = await asyncio.wait_for(proc.stderr.read(), timeout=5)
             stderr_output = stderr_bytes.decode()[:500]
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             pass
     _finalize_attempt(attempt, proc.returncode, stderr_output, issue.identifier)
 
@@ -817,20 +803,16 @@ async def run_mux_turn(
     if hooks_cfg.after_run:
         from .workspace import run_hook
 
-        await run_hook(
-            hooks_cfg.after_run, workspace_path, hooks_cfg.timeout_ms, "after_run"
-        )
+        await run_hook(hooks_cfg.after_run, workspace_path, hooks_cfg.timeout_ms, "after_run")
 
     # Unregister PID
     if on_pid and proc.pid:
         on_pid(proc.pid, False)
 
-    logger.info(
-        f"Mux turn complete issue={issue.identifier} "
-        f"status={attempt.status}"
-    )
+    logger.info(f"Mux turn complete issue={issue.identifier} status={attempt.status}")
 
     return attempt
+
 
 async def run_turn(
     runner_type: str,

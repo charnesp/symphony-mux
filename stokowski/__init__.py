@@ -1,6 +1,6 @@
 """Stokowski: Orchestrate Claude Code agents driven by Linear issues."""
 
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("stokowski")

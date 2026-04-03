@@ -1,15 +1,15 @@
 """Tests for prompt assembly module."""
 
 import pytest
-from pathlib import Path
-from stokowski.config import StateConfig, LinearStatesConfig, ServiceConfig, PromptsConfig
+
+from stokowski.config import LinearStatesConfig, PromptsConfig, ServiceConfig, StateConfig
 from stokowski.models import Issue
 from stokowski.prompt import (
-    build_lifecycle_section,
-    build_lifecycle_context,
-    render_template,
-    load_prompt_file,
     assemble_prompt,
+    build_lifecycle_context,
+    build_lifecycle_section,
+    load_prompt_file,
+    render_template,
 )
 
 
@@ -117,7 +117,9 @@ class TestBuildLifecycleSection:
             title="Test issue",
             state="In Progress",
         )
-        template = "{% for trigger, target in transitions.items() %}{{ trigger }}:{{ target }}{% endfor %}"
+        template = (
+            "{% for trigger, target in transitions.items() %}{{ trigger }}:{{ target }}{% endfor %}"
+        )
         state_cfg = StateConfig(
             name="implement",
             type="agent",
@@ -261,9 +263,7 @@ class TestAssemblePrompt:
         lifecycle_file.parent.mkdir()
         lifecycle_file.write_text("LIFECYCLE: {{ issue.identifier }}")
 
-        cfg = ServiceConfig(
-            prompts=PromptsConfig(lifecycle_prompt="prompts/lifecycle.md")
-        )
+        cfg = ServiceConfig(prompts=PromptsConfig(lifecycle_prompt="prompts/lifecycle.md"))
         issue = Issue(
             id="test-123",
             identifier="PROJ-1",
@@ -319,9 +319,7 @@ class TestAssemblePrompt:
 
     def test_raises_when_lifecycle_file_missing(self, tmp_path):
         """FileNotFoundError when lifecycle template is missing."""
-        cfg = ServiceConfig(
-            prompts=PromptsConfig(lifecycle_prompt="prompts/missing.md")
-        )
+        cfg = ServiceConfig(prompts=PromptsConfig(lifecycle_prompt="prompts/missing.md"))
         issue = Issue(
             id="test-123",
             identifier="PROJ-1",

@@ -18,4 +18,5 @@ workflow.yml
 prompts/*.md
 !prompts/*.example.md
 !prompts/lifecycle.md  # Required default lifecycle template
-workflow.test.claude.yaml
+workflow.*.yaml
+!workflow.example.yaml

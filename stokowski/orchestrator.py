@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, StrictUndefined, TemplateSyntaxError
+from jinja2 import Environment, StrictUndefined, TemplateSyntaxError, select_autoescape
 
 from .config import (
-    ClaudeConfig,
-    HooksConfig,
     ServiceConfig,
-    StateConfig,
     WorkflowConfig,
     WorkflowDefinition,
     merge_state_config,
@@ -26,9 +24,9 @@ from .config import (
 )
 from .linear import LinearClient
 from .models import Issue, RetryEntry, RunAttempt
-from .prompt import assemble_prompt, build_lifecycle_section
-from .runner import run_agent_turn, run_turn
+from .prompt import assemble_prompt
 from .reporting import extract_report, format_no_report_comment, format_report_comment
+from .runner import run_turn
 from .tracking import make_gate_comment, make_state_comment, parse_latest_tracking
 from .workspace import ensure_workspace, remove_workspace
 
@@ -58,15 +56,15 @@ class Orchestrator:
         self._retry_timers: dict[str, asyncio.TimerHandle] = {}
         self._child_pids: set[int] = set()  # Track claude subprocess PIDs
         self._last_session_ids: dict[str, str] = {}  # issue_id -> last known session_id
-        self._jinja = Environment(undefined=StrictUndefined)
+        self._jinja = Environment(undefined=StrictUndefined, autoescape=select_autoescape())
         self._running = False
         self._last_issues: dict[str, Issue] = {}
         self._last_completed_at: dict[str, datetime] = {}  # issue_id -> last worker completion time
 
         # State machine tracking
-        self._issue_current_state: dict[str, str] = {}   # issue_id -> internal state name
-        self._issue_state_runs: dict[str, int] = {}       # issue_id -> run number for current state
-        self._pending_gates: dict[str, str] = {}           # issue_id -> gate state name
+        self._issue_current_state: dict[str, str] = {}  # issue_id -> internal state name
+        self._issue_state_runs: dict[str, int] = {}  # issue_id -> run number for current state
+        self._pending_gates: dict[str, str] = {}  # issue_id -> gate state name
 
         # Workflow cache (issue_id -> WorkflowConfig)
         self._issue_workflow_cache: dict[str, WorkflowConfig] = {}
@@ -78,10 +76,33 @@ class Orchestrator:
 
     def _load_workflow(self) -> list[str]:
         """Load/reload workflow file. Returns validation errors."""
+        # Check if workflow config has changed
+        old_workflows = set()
+        if self.workflow and self.workflow.config.workflows:
+            old_workflows = set(self.workflow.config.workflows.keys())
+
         try:
             self.workflow = parse_workflow_file(self.workflow_path)
         except Exception as e:
             return [f"Workflow load error: {e}"]
+
+        # Clear workflow cache if workflows were renamed or removed
+        # This prevents stale references after config reload
+        if old_workflows:
+            new_workflows = set(self.cfg.workflows.keys())
+            removed_workflows = old_workflows - new_workflows
+            if removed_workflows:
+                logger.info(f"Workflows removed after reload: {removed_workflows}")
+                # Clear cache entries referencing removed workflows
+                stale_issue_ids = [
+                    issue_id
+                    for issue_id, wf in self._issue_workflow_cache.items()
+                    if wf.name in removed_workflows
+                ]
+                for issue_id in stale_issue_ids:
+                    del self._issue_workflow_cache[issue_id]
+                    logger.debug(f"Cleared workflow cache for {issue_id}")
+
         return validate_config(self.cfg)
 
     def _ensure_linear_client(self) -> LinearClient:
@@ -127,13 +148,13 @@ class Orchestrator:
                     timeout=self.cfg.polling.interval_ms / 1000,
                 )
                 break  # stop_event was set
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass  # Normal poll interval elapsed
 
     async def stop(self):
         """Stop the orchestration loop and kill all running agents."""
         self._running = False
-        if hasattr(self, '_stop_event'):
+        if hasattr(self, "_stop_event"):
             self._stop_event.set()
 
         # Kill all child claude processes first
@@ -141,14 +162,12 @@ class Orchestrator:
             try:
                 os.killpg(os.getpgid(pid), signal.SIGKILL)
             except (ProcessLookupError, PermissionError, OSError):
-                try:
+                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                     os.kill(pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError, OSError):
-                    pass
         self._child_pids.clear()
 
         # Cancel async tasks
-        for issue_id, task in list(self._tasks.items()):
+        for _issue_id, task in list(self._tasks.items()):
             task.cancel()
         # Give them a moment to finish
         if self._tasks:
@@ -174,7 +193,9 @@ class Orchestrator:
         except Exception as e:
             logger.warning(f"Startup cleanup failed (continuing): {e}")
 
-    async def _resolve_workflow_for_issue(self, issue: Issue, tracking: dict[str, Any] | None = None) -> WorkflowConfig | None:
+    async def _resolve_workflow_for_issue(
+        self, issue: Issue, tracking: dict[str, Any] | None = None
+    ) -> WorkflowConfig | None:
         """Resolve workflow for an issue with caching and tracking support.
 
         Priority:
@@ -187,12 +208,36 @@ class Orchestrator:
             return self._issue_workflow_cache[issue.id]
 
         # 2. Try to read from tracking comment (crash recovery)
+        # Verify that tracked workflow still matches current labels to handle
+        # cases where issue labels were changed after initial dispatch
         if tracking and "workflow" in tracking:
             workflow_name = tracking["workflow"]
+            labels = getattr(issue, "labels", []) or []
+
+            # Check if tracked workflow still matches current labels
+            tracked_wf_still_valid = False
             if self.cfg.workflows and workflow_name in self.cfg.workflows:
-                workflow = self.cfg.workflows[workflow_name]
-                self._issue_workflow_cache[issue.id] = workflow
-                return workflow
+                tracked_wf = self.cfg.workflows[workflow_name]
+                # Check if labels still match this workflow
+                if tracked_wf.label and tracked_wf.label in labels:
+                    tracked_wf_still_valid = True
+                elif tracked_wf.default and not any(
+                    wf.label and wf.label in labels
+                    for wf in self.cfg.workflows.values()
+                    if wf.label
+                ):
+                    # Tracked workflow is default and no other workflow matches
+                    tracked_wf_still_valid = True
+
+                if tracked_wf_still_valid:
+                    self._issue_workflow_cache[issue.id] = tracked_wf
+                    return tracked_wf
+                else:
+                    logger.warning(
+                        f"Tracked workflow '{workflow_name}' for {issue.identifier} "
+                        f"no longer matches labels {labels}, will re-resolve"
+                    )
+
             elif workflow_name == "default":
                 # Legacy mode or explicit default workflow
                 if self.cfg.workflows:
@@ -303,14 +348,15 @@ class Orchestrator:
         self._issue_state_runs[issue.id] = 1
         return entry, 1
 
-    async def _safe_enter_gate(self, issue: Issue, state_name: str, workflow_name: str | None = None):
+    async def _safe_enter_gate(
+        self, issue: Issue, state_name: str, workflow_name: str | None = None
+    ):
         """Wrapper around _enter_gate that logs errors."""
         try:
             await self._enter_gate(issue, state_name, workflow_name)
         except Exception as e:
             logger.error(
-                f"Enter gate failed issue={issue.identifier} "
-                f"gate={state_name}: {e}",
+                f"Enter gate failed issue={issue.identifier} gate={state_name}: {e}",
                 exc_info=True,
             )
 
@@ -369,10 +415,7 @@ class Orchestrator:
         self._tasks.pop(issue.id, None)
         self.claimed.discard(issue.id)
 
-        logger.info(
-            f"Gate entered issue={issue.identifier} gate={state_name} "
-            f"run={run}"
-        )
+        logger.info(f"Gate entered issue={issue.identifier} gate={state_name} run={run}")
 
     async def _safe_transition(self, issue: Issue, transition_name: str):
         """Wrapper around _transition that logs errors instead of silently swallowing them."""
@@ -380,8 +423,7 @@ class Orchestrator:
             await self._transition(issue, transition_name)
         except Exception as e:
             logger.error(
-                f"Transition failed issue={issue.identifier} "
-                f"transition={transition_name}: {e}",
+                f"Transition failed issue={issue.identifier} transition={transition_name}: {e}",
                 exc_info=True,
             )
             # Release claimed so the issue can be retried on next tick
@@ -436,14 +478,20 @@ class Orchestrator:
 
         if target_cfg.type == "terminal":
             # Move issue to terminal state
-            terminal_state = self.cfg.terminal_linear_states()[0] if self.cfg.terminal_linear_states() else "Done"
+            terminal_state = (
+                self.cfg.terminal_linear_states()[0]
+                if self.cfg.terminal_linear_states()
+                else "Done"
+            )
             try:
                 client = self._ensure_linear_client()
                 moved = await client.update_issue_state(issue.id, terminal_state)
                 if moved:
                     logger.info(f"Moved {issue.identifier} to terminal state '{terminal_state}'")
                 else:
-                    logger.warning(f"Failed to move {issue.identifier} to terminal state '{terminal_state}'")
+                    logger.warning(
+                        f"Failed to move {issue.identifier} to terminal state '{terminal_state}'"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to move {issue.identifier} to terminal: {e}")
             # Clean up workspace
@@ -480,7 +528,9 @@ class Orchestrator:
             active_state = self.cfg.linear_states.active
             moved = await client.update_issue_state(issue.id, active_state)
             if not moved:
-                logger.warning(f"Failed to move {issue.identifier} to active state '{active_state}'")
+                logger.warning(
+                    f"Failed to move {issue.identifier} to active state '{active_state}'"
+                )
 
             self._schedule_retry(issue, attempt_num=0, delay_ms=1000)
 
@@ -489,9 +539,7 @@ class Orchestrator:
         # Early return if no gate states in any workflow
         has_gates = any(sc.type == "gate" for sc in self.cfg.states.values())
         has_gates = has_gates or any(
-            sc.type == "gate"
-            for wf in self.cfg.workflows.values()
-            for sc in wf.states.values()
+            sc.type == "gate" for wf in self.cfg.workflows.values() for sc in wf.states.values()
         )
         if not has_gates:
             return
@@ -516,20 +564,29 @@ class Orchestrator:
             if not gate_state:
                 comments = await client.fetch_comments(issue.id)
                 tracking = parse_latest_tracking(comments)
-                if tracking and tracking.get("type") == "gate" and tracking.get("status") == "waiting":
+                if (
+                    tracking
+                    and tracking.get("type") == "gate"
+                    and tracking.get("status") == "waiting"
+                ):
                     gate_state = tracking.get("state", "")
 
             if gate_state:
                 # Resolve workflow for this issue (using tracking to get stored workflow)
                 workflow = await self._resolve_workflow_for_issue(issue, tracking)
                 if workflow is None:
-                    logger.error(f"Cannot handle gate approval for {issue.identifier}: no workflow found")
+                    logger.error(
+                        f"Cannot handle gate approval for {issue.identifier}: no workflow found"
+                    )
                     continue
                 workflow_states = workflow.states
 
                 run = self._issue_state_runs.get(issue.id, 1)
                 comment = make_gate_comment(
-                    state=gate_state, status="approved", run=run, workflow=workflow.name,
+                    state=gate_state,
+                    status="approved",
+                    run=run,
+                    workflow=workflow.name,
                 )
                 await client.post_comment(issue.id, comment)
 
@@ -538,16 +595,26 @@ class Orchestrator:
                 gate_cfg = workflow_states.get(gate_state)
                 if gate_cfg and "approve" in gate_cfg.transitions:
                     target = gate_cfg.transitions["approve"]
-                    self._issue_current_state[issue.id] = target
+                    # Validate target exists in workflow_states
+                    if target in workflow_states:
+                        self._issue_current_state[issue.id] = target
+                    else:
+                        logger.error(
+                            f"Gate '{gate_state}' approve transition points to unknown state '{target}'"
+                        )
 
                 active_state = self.cfg.linear_states.active
                 moved = await client.update_issue_state(issue.id, active_state)
                 if moved:
                     issue.state = active_state
                 else:
-                    logger.warning(f"Failed to move {issue.identifier} to active after gate approval")
+                    logger.warning(
+                        f"Failed to move {issue.identifier} to active after gate approval"
+                    )
                 self._last_issues[issue.id] = issue
-                logger.info(f"Gate approved issue={issue.identifier} gate={gate_state} workflow={workflow.name}")
+                logger.info(
+                    f"Gate approved issue={issue.identifier} gate={gate_state} workflow={workflow.name}"
+                )
 
         # Fetch rework issues
         try:
@@ -567,7 +634,11 @@ class Orchestrator:
             if not gate_state:
                 comments = await client.fetch_comments(issue.id)
                 tracking = parse_latest_tracking(comments)
-                if tracking and tracking.get("type") == "gate" and tracking.get("status") == "waiting":
+                if (
+                    tracking
+                    and tracking.get("type") == "gate"
+                    and tracking.get("status") == "waiting"
+                ):
                     gate_state = tracking.get("state", "")
 
             if gate_state:
@@ -584,13 +655,23 @@ class Orchestrator:
                     logger.warning(f"Gate {gate_state} has no rework_to target, skipping")
                     continue
 
+                # Validate rework_to exists in workflow_states
+                if rework_to not in workflow_states:
+                    logger.error(
+                        f"Gate '{gate_state}' rework_to '{rework_to}' is not a valid state, skipping"
+                    )
+                    continue
+
                 # Check max_rework
                 run = self._issue_state_runs.get(issue.id, 1)
                 max_rework = gate_cfg.max_rework if gate_cfg else None
                 if max_rework is not None and run >= max_rework:
                     # Exceeded max rework — post escalated comment, don't transition
                     comment = make_gate_comment(
-                        state=gate_state, status="escalated", run=run, workflow=workflow.name,
+                        state=gate_state,
+                        status="escalated",
+                        run=run,
+                        workflow=workflow.name,
                     )
                     await client.post_comment(issue.id, comment)
                     logger.warning(
@@ -603,8 +684,11 @@ class Orchestrator:
                 self._issue_state_runs[issue.id] = new_run
 
                 comment = make_gate_comment(
-                    state=gate_state, status="rework",
-                    rework_to=rework_to, run=new_run, workflow=workflow.name,
+                    state=gate_state,
+                    status="rework",
+                    rework_to=rework_to,
+                    run=new_run,
+                    workflow=workflow.name,
                 )
                 await client.post_comment(issue.id, comment)
 
@@ -657,7 +741,7 @@ class Orchestrator:
         candidates.sort(
             key=lambda i: (
                 i.priority if i.priority is not None else 999,
-                i.created_at or datetime.min.replace(tzinfo=timezone.utc),
+                i.created_at or datetime.min.replace(tzinfo=UTC),
                 i.identifier,
             )
         )
@@ -671,9 +755,7 @@ class Orchestrator:
                     logger.warning(f"Failed to resolve state for {issue.identifier}: {e}")
 
         # Part 5: Dispatch
-        available_slots = max(
-            self.cfg.agent.max_concurrent_agents - len(self.running), 0
-        )
+        available_slots = max(self.cfg.agent.max_concurrent_agents - len(self.running), 0)
 
         for issue in candidates:
             if available_slots <= 0:
@@ -688,7 +770,9 @@ class Orchestrator:
                 state_count = sum(
                     1
                     for r in self.running.values()
-                    if self._last_issues.get(r.issue_id, Issue(id="", identifier="", title="")).state.strip().lower()
+                    if self._last_issues.get(r.issue_id, Issue(id="", identifier="", title=""))
+                    .state.strip()
+                    .lower()
                     == state_key
                 )
                 if state_count >= state_limit:
@@ -723,7 +807,9 @@ class Orchestrator:
 
         return True
 
-    def _dispatch(self, issue: Issue, attempt_num: int | None = None, previous_error: str | None = None):
+    def _dispatch(
+        self, issue: Issue, attempt_num: int | None = None, previous_error: str | None = None
+    ):
         """Dispatch a worker for an issue."""
         self.claimed.add(issue.id)
 
@@ -860,6 +946,7 @@ class Orchestrator:
             # Run on_stage_enter hook if defined
             if state_cfg and state_cfg.hooks and state_cfg.hooks.on_stage_enter:
                 from .workspace import run_hook
+
                 ok = await run_hook(
                     state_cfg.hooks.on_stage_enter,
                     ws.path,
@@ -969,7 +1056,9 @@ class Orchestrator:
                 workflow = self.cfg.get_workflow_for_issue(issue)
             except ValueError as e:
                 logger.error(f"Prompt render failed - no workflow matches {issue.identifier}: {e}")
-                raise RuntimeError(f"No workflow configured for issue with labels {getattr(issue, 'labels', [])}") from e
+                raise RuntimeError(
+                    f"No workflow configured for issue with labels {getattr(issue, 'labels', [])}"
+                ) from e
 
         workflow_states = workflow.states
         workflow_prompts = workflow.prompts
@@ -1023,7 +1112,9 @@ class Orchestrator:
                 workflow = self.cfg.get_workflow_for_issue(issue)
             except ValueError as e:
                 logger.error(f"Prompt render failed - no workflow matches {issue.identifier}: {e}")
-                raise RuntimeError(f"No workflow configured for issue with labels {getattr(issue, 'labels', [])}") from e
+                raise RuntimeError(
+                    f"No workflow configured for issue with labels {getattr(issue, 'labels', [])}"
+                ) from e
 
         workflow_states = workflow.states
         workflow_prompts = workflow.prompts
@@ -1084,7 +1175,7 @@ class Orchestrator:
                 stage=state_name,
             )
         except TemplateSyntaxError as e:
-            raise RuntimeError(f"Template syntax error: {e}")
+            raise RuntimeError(f"Template syntax error: {e}") from e
 
     def _on_child_pid(self, pid: int, is_register: bool):
         """Track child claude process PIDs for cleanup on shutdown."""
@@ -1126,8 +1217,10 @@ class Orchestrator:
 
         # Extract report from agent output
         report_content = extract_report(attempt.full_output)
-        
-        logger.info(f"Report extraction for {issue.identifier}: {'found' if report_content else 'not found'} ({len(attempt.full_output)} chars in full_output)")
+
+        logger.info(
+            f"Report extraction for {issue.identifier}: {'found' if report_content else 'not found'} ({len(attempt.full_output)} chars in full_output)"
+        )
 
         if report_content:
             comment = format_report_comment(
@@ -1161,22 +1254,20 @@ class Orchestrator:
         self.total_output_tokens += attempt.output_tokens
         self.total_tokens += attempt.total_tokens
         if attempt.started_at:
-            elapsed = (datetime.now(timezone.utc) - attempt.started_at).total_seconds()
+            elapsed = (datetime.now(UTC) - attempt.started_at).total_seconds()
             self.total_seconds_running += elapsed
 
         if attempt.session_id:
             self._last_session_ids[issue.id] = attempt.session_id
 
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
         attempt.completed_at = completed_at
         if attempt.status != "canceled":
             self._last_completed_at[issue.id] = completed_at
 
         # Post work report (async)
         if attempt.full_output:
-            asyncio.create_task(
-                self._post_work_report(issue, attempt, attempt.state_name)
-            )
+            asyncio.create_task(self._post_work_report(issue, attempt, attempt.state_name))
 
         self.running.pop(issue.id, None)
         self._tasks.pop(issue.id, None)
@@ -1280,9 +1371,7 @@ class Orchestrator:
             return
 
         # Check slots
-        available = max(
-            self.cfg.agent.max_concurrent_agents - len(self.running), 0
-        )
+        available = max(self.cfg.agent.max_concurrent_agents - len(self.running), 0)
         if available <= 0:
             # Re-queue
             self._schedule_retry(
@@ -1309,12 +1398,8 @@ class Orchestrator:
             logger.warning(f"Reconciliation state fetch failed: {e}")
             return
 
-        terminal_lower = [
-            s.strip().lower() for s in self.cfg.terminal_linear_states()
-        ]
-        active_lower = [
-            s.strip().lower() for s in self.cfg.active_linear_states()
-        ]
+        terminal_lower = [s.strip().lower() for s in self.cfg.terminal_linear_states()]
+        active_lower = [s.strip().lower() for s in self.cfg.active_linear_states()]
         review_lower = self.cfg.linear_states.review.strip().lower()
 
         for issue_id in running_ids:
@@ -1326,9 +1411,7 @@ class Orchestrator:
 
             if state_lower in terminal_lower:
                 # Terminal - stop worker and clean workspace
-                logger.info(
-                    f"Reconciliation: {issue_id} is terminal ({current_state}), stopping"
-                )
+                logger.info(f"Reconciliation: {issue_id} is terminal ({current_state}), stopping")
                 task = self._tasks.get(issue_id)
                 if task:
                     task.cancel()
@@ -1336,9 +1419,7 @@ class Orchestrator:
                 attempt = self.running.get(issue_id)
                 if attempt:
                     ws_root = self.cfg.workspace.resolved_root()
-                    await remove_workspace(
-                        ws_root, attempt.issue_identifier, self.cfg.hooks
-                    )
+                    await remove_workspace(ws_root, attempt.issue_identifier, self.cfg.hooks)
 
                 self.running.pop(issue_id, None)
                 self._tasks.pop(issue_id, None)
@@ -1356,9 +1437,7 @@ class Orchestrator:
 
             elif state_lower not in active_lower:
                 # Neither active nor terminal nor review - stop without cleanup
-                logger.info(
-                    f"Reconciliation: {issue_id} not active ({current_state}), stopping"
-                )
+                logger.info(f"Reconciliation: {issue_id} not active ({current_state}), stopping")
                 task = self._tasks.get(issue_id)
                 if task:
                     task.cancel()
@@ -1369,11 +1448,9 @@ class Orchestrator:
 
     def get_state_snapshot(self) -> dict[str, Any]:
         """Get current runtime state for observability."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         active_seconds = sum(
-            (now - r.started_at).total_seconds()
-            for r in self.running.values()
-            if r.started_at
+            (now - r.started_at).total_seconds() for r in self.running.values() if r.started_at
         )
 
         return {
@@ -1394,9 +1471,7 @@ class Orchestrator:
                     "last_event": r.last_event,
                     "last_message": r.last_message,
                     "started_at": r.started_at.isoformat() if r.started_at else None,
-                    "last_event_at": (
-                        r.last_event_at.isoformat() if r.last_event_at else None
-                    ),
+                    "last_event_at": (r.last_event_at.isoformat() if r.last_event_at else None),
                     "tokens": {
                         "input_tokens": r.input_tokens,
                         "output_tokens": r.output_tokens,
@@ -1418,7 +1493,9 @@ class Orchestrator:
             "gates": [
                 {
                     "issue_id": issue_id,
-                    "issue_identifier": self._last_issues.get(issue_id, Issue(id="", identifier=issue_id, title="")).identifier,
+                    "issue_identifier": self._last_issues.get(
+                        issue_id, Issue(id="", identifier=issue_id, title="")
+                    ).identifier,
                     "gate_state": gate_state,
                     "run": self._issue_state_runs.get(issue_id, 1),
                 }
@@ -1428,8 +1505,6 @@ class Orchestrator:
                 "input_tokens": self.total_input_tokens,
                 "output_tokens": self.total_output_tokens,
                 "total_tokens": self.total_tokens,
-                "seconds_running": round(
-                    self.total_seconds_running + active_seconds, 1
-                ),
+                "seconds_running": round(self.total_seconds_running + active_seconds, 1),
             },
         }

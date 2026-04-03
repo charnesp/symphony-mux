@@ -1,13 +1,14 @@
 """Tests for multi-workflow routing functionality."""
 
 from dataclasses import dataclass, field
-from typing import Any
+
+import pytest
 
 from stokowski.config import (
-    ServiceConfig,
-    WorkflowConfig,
-    StateConfig,
     PromptsConfig,
+    ServiceConfig,
+    StateConfig,
+    WorkflowConfig,
     parse_workflow_file,
 )
 
@@ -15,6 +16,7 @@ from stokowski.config import (
 @dataclass
 class MockIssue:
     """Mock Linear issue for testing."""
+
     id: str = "issue-1"
     identifier: str = "TEST-1"
     title: str = "Test Issue"
@@ -86,11 +88,8 @@ class TestWorkflowRouting:
 
         issue = MockIssue(labels=["unknown-label"])
 
-        try:
+        with pytest.raises(ValueError, match="No workflow matches issue labels"):
             cfg.get_workflow_for_issue(issue)
-            assert False, "Should have raised ValueError"
-        except ValueError as e:
-            assert "No workflow matches issue labels" in str(e)
 
     def test_legacy_mode_single_workflow(self):
         """Legacy configs without workflows section create implicit default."""
