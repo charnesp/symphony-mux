@@ -348,6 +348,48 @@ class Orchestrator:
         self._issue_state_runs[issue.id] = 1
         return entry, 1
 
+    async def _handle_orphaned_issue(self, issue: Issue, context: str):
+        """Handle an issue whose workflow is no longer available.
+
+        Moves the issue to a terminal state and posts a comment explaining
+        the situation. Prevents issues from getting stuck in limbo.
+        """
+        logger.warning(f"Handling orphaned issue={issue.identifier} context={context}")
+        client = self._ensure_linear_client()
+
+        # Move to terminal state
+        terminal_state = (
+            self.cfg.terminal_linear_states()[0]
+            if self.cfg.terminal_linear_states()
+            else "Done"
+        )
+        try:
+            moved = await client.update_issue_state(issue.id, terminal_state)
+            if moved:
+                logger.info(f"Moved orphaned {issue.identifier} to {terminal_state}")
+            else:
+                logger.warning(f"Failed to move orphaned {issue.identifier} to terminal")
+        except Exception as e:
+            logger.error(f"Failed to handle orphaned issue {issue.identifier}: {e}")
+
+        # Post explanatory comment
+        try:
+            comment = (
+                f"**[Stokowski]** ⚠️ Configuration Error\n\n"
+                f"This issue's workflow is no longer available (detected during {context}). "
+                f"The issue has been moved to '{terminal_state}'. "
+                f"Please check the workflow configuration."
+            )
+            await client.post_comment(issue.id, comment)
+        except Exception as e:
+            logger.warning(f"Failed to post orphan comment for {issue.identifier}: {e}")
+
+        # Clean up tracking state
+        self._issue_current_state.pop(issue.id, None)
+        self._issue_state_runs.pop(issue.id, None)
+        self._pending_gates.pop(issue.id, None)
+        self._issue_workflow_cache.pop(issue.id, None)
+
     async def _safe_enter_gate(
         self, issue: Issue, state_name: str, workflow_name: str | None = None
     ):
@@ -578,6 +620,8 @@ class Orchestrator:
                     logger.error(
                         f"Cannot handle gate approval for {issue.identifier}: no workflow found"
                     )
+                    # Issue is orphaned - move to terminal state to prevent stuck state
+                    await self._handle_orphaned_issue(issue, "gate approval")
                     continue
                 workflow_states = workflow.states
 
@@ -646,6 +690,8 @@ class Orchestrator:
                 workflow = await self._resolve_workflow_for_issue(issue, tracking)
                 if workflow is None:
                     logger.error(f"Cannot handle rework for {issue.identifier}: no workflow found")
+                    # Issue is orphaned - move to terminal state to prevent stuck state
+                    await self._handle_orphaned_issue(issue, "rework")
                     continue
                 workflow_states = workflow.states
 

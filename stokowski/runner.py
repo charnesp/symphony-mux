@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -648,11 +649,15 @@ async def run_mux_turn(
         nonlocal last_activity
         raw_output_lines = []
         assistant_messages = []
-        # Debug: save raw NDJSON to file
 
-        debug_ndjson_path = f"/tmp/stokowski_ndjson_{issue.identifier.replace('-', '_')}.json"  # nosec B108
-        debug_file = open(debug_ndjson_path, "w")  # noqa: SIM115
-        logger.info(f"Saving raw NDJSON to {debug_ndjson_path}")
+        # Debug: optionally save raw NDJSON to file (controlled by env var)
+        debug_ndjson = os.environ.get("STOKOWSKI_DEBUG_NDJSON", "")
+        debug_file = None
+        if debug_ndjson:
+            debug_ndjson_path = f"/tmp/stokowski_ndjson_{issue.identifier.replace('-', '_')}.json"  # nosec B108
+            debug_file = open(debug_ndjson_path, "w")
+            logger.info(f"Saving raw NDJSON to {debug_ndjson_path}")
+
         while proc.stdout:
             line = await proc.stdout.readline()
             if not line:
@@ -665,8 +670,9 @@ async def run_mux_turn(
                 continue
 
             raw_output_lines.append(line_str)
-            debug_file.write(line_str + "\n")
-            debug_file.flush()
+            if debug_file:
+                debug_file.write(line_str + "\n")
+                debug_file.flush()
             attempt.last_message = line_str[:200]
 
             # Parse as JSON and extract assistant messages
@@ -746,7 +752,8 @@ async def run_mux_turn(
                     logger.debug(f"Mux: Non-JSON text ({len(line_str)} chars)")
 
         # Store raw NDJSON for debugging, but also reconstructed readable output
-        debug_file.close()
+        if debug_file:
+            debug_file.close()
         readable_output = "\n".join(assistant_messages)
         attempt.full_output = readable_output
         logger.info(
