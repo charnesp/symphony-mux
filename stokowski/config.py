@@ -163,12 +163,11 @@ class ServiceConfig:
     workflows: dict[str, WorkflowConfig] = field(default_factory=lambda: {})
 
     def resolved_api_key(self) -> str:
+        """Resolve API key, supporting $ENV_VAR references."""
         key = self.tracker.api_key
         if not key:
             return os.environ.get("LINEAR_API_KEY", "")
-        if key.startswith("$"):
-            return os.environ.get(key[1:], "")
-        return key
+        return _resolve_env(key)
 
     def agent_env(self) -> dict[str, str]:
         """Build env vars to pass to agent subprocesses.
@@ -180,10 +179,13 @@ class ServiceConfig:
         api_key = self.resolved_api_key()
         if api_key:
             env["LINEAR_API_KEY"] = api_key
-        if self.tracker.project_slug:
-            env["LINEAR_PROJECT_SLUG"] = self.tracker.project_slug
-        if self.tracker.endpoint:
-            env["LINEAR_ENDPOINT"] = self.tracker.endpoint
+        # Resolve project_slug and endpoint if they contain $VAR references
+        project_slug = _resolve_env(self.tracker.project_slug)
+        if project_slug:
+            env["LINEAR_PROJECT_SLUG"] = project_slug
+        endpoint = _resolve_env(self.tracker.endpoint)
+        if endpoint:
+            env["LINEAR_ENDPOINT"] = endpoint
         return env
 
     @property
