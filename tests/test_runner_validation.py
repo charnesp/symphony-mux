@@ -13,19 +13,20 @@ class TestValidateAgentOutput:
         """Empty output should fail validation."""
         is_valid, error = validate_agent_output("")
         assert not is_valid
-        assert "no output" in error.lower()
+        assert error is not None and "no output" in error.lower()
 
     def test_none_output_returns_error(self):
         """None output should fail validation."""
         is_valid, error = validate_agent_output(None)
         assert not is_valid
-        assert "no output" in error.lower()
+        assert error is not None and "no output" in error.lower()
 
     def test_missing_start_tag(self):
         """Missing opening tag should fail validation."""
         output = "Some response without report tags"
         is_valid, error = validate_agent_output(output)
         assert not is_valid
+        assert error is not None
         assert "MISSING REQUIRED REPORT" in error
         assert "<stokowski:report>" in error
 
@@ -34,6 +35,7 @@ class TestValidateAgentOutput:
         output = "<stokowski:report>Content without closing tag"
         is_valid, error = validate_agent_output(output)
         assert not is_valid
+        assert error is not None
         assert "MISSING CLOSING TAG" in error
         assert "</stokowski:report>" in error
 
@@ -42,6 +44,7 @@ class TestValidateAgentOutput:
         output = "</stokowski:report>Content<stokowski:report>"
         is_valid, error = validate_agent_output(output)
         assert not is_valid
+        assert error is not None
         assert "INVALID TAG ORDER" in error
 
     def test_valid_report(self):
@@ -125,6 +128,7 @@ class TestFinalizeAttempt:
         _finalize_attempt(attempt, returncode=0, stderr_output="", issue_identifier="TEST-123")
 
         assert attempt.status == "failed"
+        assert attempt.error is not None
         assert "Report validation failed" in attempt.error
         assert "MISSING REQUIRED REPORT" in attempt.error
 
@@ -213,4 +217,5 @@ Task done
         _finalize_attempt(attempt, returncode=0, stderr_output="", issue_identifier="TEST-789")
 
         assert attempt.status == "failed"
+        assert attempt.error is not None
         assert "Report validation failed" in attempt.error

@@ -71,7 +71,7 @@ def validate_agent_output(output_text: str | None) -> tuple[bool, str | None]:
 
 def _finalize_attempt(
     attempt: RunAttempt,
-    returncode: int,
+    returncode: int | None,
     stderr_output: str,
     issue_identifier: str,
 ) -> None:
@@ -89,6 +89,11 @@ def _finalize_attempt(
     """
     if attempt.status != "streaming":
         # Already set by stall/timeout handler
+        return
+
+    if returncode is None:
+        attempt.status = "failed"
+        attempt.error = "Process did not return an exit code"
         return
 
     if returncode == 0:
@@ -216,10 +221,11 @@ async def run_codex_turn(
         )
 
         # Write prompt to stdin (avoids argument parsing issues)
-        proc.stdin.write(prompt.encode())
-        await proc.stdin.drain()
-        proc.stdin.close()
-        await proc.stdin.wait_closed()
+        if proc.stdin:
+            proc.stdin.write(prompt.encode())
+            await proc.stdin.drain()
+            proc.stdin.close()
+            await proc.stdin.wait_closed()
 
         if on_pid and proc.pid:
             on_pid(proc.pid, True)
@@ -237,7 +243,7 @@ async def run_codex_turn(
     async def read_stream():
         nonlocal last_activity
         output_lines = []
-        while True:
+        while proc.stdout:
             line = await proc.stdout.readline()
             if not line:
                 break
@@ -377,10 +383,11 @@ async def run_agent_turn(
         )
 
         # Write prompt to stdin (avoids argument parsing issues)
-        proc.stdin.write(prompt.encode())
-        await proc.stdin.drain()
-        proc.stdin.close()
-        await proc.stdin.wait_closed()
+        if proc.stdin:
+            proc.stdin.write(prompt.encode())
+            await proc.stdin.drain()
+            proc.stdin.close()
+            await proc.stdin.wait_closed()
 
         if on_pid and proc.pid:
             on_pid(proc.pid, True)
@@ -399,7 +406,7 @@ async def run_agent_turn(
     async def read_stream():
         nonlocal last_activity
         output_lines = []
-        while True:
+        while proc.stdout:
             line = await proc.stdout.readline()
             if not line:
                 break
@@ -617,10 +624,11 @@ async def run_mux_turn(
         )
 
         # Write prompt to stdin (avoids argument parsing issues)
-        proc.stdin.write(prompt.encode())
-        await proc.stdin.drain()
-        proc.stdin.close()
-        await proc.stdin.wait_closed()
+        if proc.stdin:
+            proc.stdin.write(prompt.encode())
+            await proc.stdin.drain()
+            proc.stdin.close()
+            await proc.stdin.wait_closed()
 
         if on_pid and proc.pid:
             on_pid(proc.pid, True)
@@ -645,7 +653,7 @@ async def run_mux_turn(
         debug_ndjson_path = f"/tmp/stokowski_ndjson_{issue.identifier.replace('-', '_')}.json"  # nosec B108
         debug_file = open(debug_ndjson_path, "w")  # noqa: SIM115
         logger.info(f"Saving raw NDJSON to {debug_ndjson_path}")
-        while True:
+        while proc.stdout:
             line = await proc.stdout.readline()
             if not line:
                 break

@@ -190,17 +190,6 @@ states:
     transitions:
       complete: merge-review
 
-  # Example using Mux for investigation (uncomment to use)
-  # investigate-with-mux:
-  #   type: agent
-  #   runner: mux
-  #   prompt: prompts/investigate.example.md
-  #   linear_state: active
-  #   model: claude-4
-  #   max_turns: 8
-  #   transitions:
-  #     complete: research-review
-
   # ── 6. Merge Review (gate) ──────────────────────────────────────────────
   # Human reviews the code review findings and decides to merge or rework.
   # Rework goes back to implement (not code-review).

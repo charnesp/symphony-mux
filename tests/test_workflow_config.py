@@ -21,7 +21,7 @@ class MockIssue:
     id: str = "issue-1"
     identifier: str = "TEST-1"
     title: str = "Test Issue"
-    labels: list[str] = None
+    labels: list[str] | None = None
 
     def __post_init__(self):
         if self.labels is None:

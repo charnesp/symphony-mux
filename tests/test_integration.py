@@ -376,7 +376,7 @@ workflows:
         issue = MockIssue(id="issue-123", identifier="TEST-123", labels=[])
 
         # Call the method under test
-        result = await orch._resolve_workflow_for_issue(issue, tracking)
+        result = await orch._resolve_workflow_for_issue(issue, tracking)  # type: ignore[arg-type]
 
         # Should return the explicit default workflow (general)
         assert result is not None
@@ -414,7 +414,7 @@ workflows:
         # Issue with matching label (debug)
         issue = MockIssue(id="issue-123", identifier="TEST-123", labels=["debug"])
 
-        result = await orch._resolve_workflow_for_issue(issue, tracking)
+        result = await orch._resolve_workflow_for_issue(issue, tracking)  # type: ignore[arg-type]
 
         # No explicit default, so falls through to label-based routing
         assert result is not None

@@ -828,10 +828,11 @@ class Orchestrator:
             state_name = self.cfg.entry_state_for_workflow(workflow)
 
         # If at a gate, enter it instead of dispatching a worker
-        state_cfg = workflow.states.get(state_name) if state_name else None
-        if state_cfg and state_cfg.type == "gate":
-            asyncio.create_task(self._safe_enter_gate(issue, state_name, workflow_name))
-            return
+        if state_name:
+            state_cfg = workflow.states.get(state_name)
+            if state_cfg and state_cfg.type == "gate":
+                asyncio.create_task(self._safe_enter_gate(issue, state_name, workflow_name))
+                return
 
         attempt = RunAttempt(
             issue_id=issue.id,
