@@ -21,7 +21,7 @@ You are in the fix stage. The investigation is complete and a fix has been appro
 
 1. Create a new branch for your fix:
    ```bash
-   git checkout -b fix/{{issue_identifier}}-brief-description
+   git checkout -b fix/{{ issue.identifier }}-brief-description
    ```
 
 2. Make the minimal code changes needed
@@ -42,7 +42,7 @@ You are in the fix stage. The investigation is complete and a fix has been appro
 
 ## Branch Naming Convention
 
-Use the format: `fix/{{issue_identifier}}-brief-kebab-description`
+Use the format: `fix/{{ issue.identifier }}-brief-kebab-description`
 
 Examples:
 - `fix/ENG-123-null-pointer-checkout`
@@ -68,12 +68,16 @@ One sentence explaining why the bug occurred.
 - [ ] Existing tests pass
 - [ ] Manual verification steps
 
-Fixes {{issue_identifier}}
+Fixes {{ issue.identifier }}
 ```
 
-Create the PR with:
+Create the PR/MR with:
 ```bash
+# GitHub
 gh pr create --title "fix: brief description" --body "..." --base main
+
+# GitLab
+glab mr create --title "fix: brief description" --description "..." --target-branch main
 ```
 
 ## Completion Criteria

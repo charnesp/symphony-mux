@@ -100,18 +100,10 @@ def build_template_context(
         last_run_at: ISO timestamp of the last run, if any.
 
     Returns:
-        A flat dict suitable for Jinja2 rendering.
+        A dict with the issue object and run metadata for Jinja2 rendering.
     """
     return {
-        "issue_id": issue.id,
-        "issue_identifier": issue.identifier,
-        "issue_title": issue.title,
-        "issue_description": issue.description or "",
-        "issue_url": issue.url or "",
-        "issue_priority": issue.priority,
-        "issue_state": issue.state,
-        "issue_branch": issue.branch_name or "",
-        "issue_labels": issue.labels,
+        "issue": issue,
         "state_name": state_name,
         "run": run,
         "attempt": attempt,
@@ -132,6 +124,8 @@ def build_lifecycle_context(
 ) -> dict[str, Any]:
     """Build the extended template context with lifecycle-specific variables.
 
+    Extends the base template context with lifecycle-specific variables.
+
     Args:
         issue: The Linear issue.
         state_name: Internal state machine state name.
@@ -146,6 +140,9 @@ def build_lifecycle_context(
     Returns:
         Dict with all lifecycle-specific template variables.
     """
+    # Start with base context
+    context = build_template_context(issue=issue, state_name=state_name, run=run)
+
     # Check if any transition leads to a gate
     has_gate_transition = False
     gate_targets = []
@@ -156,17 +153,17 @@ def build_lifecycle_context(
                 has_gate_transition = True
                 gate_targets.append((trigger, target))
 
-    return {
+    # Add lifecycle-specific variables
+    context.update({
         "previous_error": previous_error or "",
         "is_rework": is_rework,
         "recent_comments": recent_comments or [],
         "transitions": state_cfg.transitions or {},
         "has_gate_transition": has_gate_transition,
         "gate_targets": gate_targets,
-        "issue": issue,
-        "state_name": state_name,
-        "run": run,
-    }
+    })
+
+    return context
 
 
 def build_lifecycle_section(

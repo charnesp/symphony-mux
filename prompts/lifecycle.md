@@ -56,12 +56,18 @@ The following items need explicit approval before proceeding:
 {% endif %}
 ## Lifecycle Context
 
-- **Issue:** {{ issue_identifier }} — {{ issue_title }}
-{% if issue_url %}
-- **URL:** {{ issue_url }}
+- **Issue:** {{ issue.identifier }} — {{ issue.title }}
+{% if issue.url %}
+- **URL:** {{ issue.url }}
 {% endif %}
 - **State:** {{ state_name }}
 - **Run:** {{ run }}
+{% if issue.description %}
+
+### Description
+
+{{ issue.description }}
+{% endif %}
 
 {% if is_rework %}
 ### Rework

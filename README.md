@@ -38,6 +38,7 @@ Built on [OpenAI's Symphony](https://github.com/openai/symphony) spec and taken 
   - [6. Validate](#6-validate)
   - [7. Run](#7-run)
 - [Configuration reference](#configuration-reference)
+  - [Session modes: inherit vs fresh](#session-modes-inherit-vs-fresh)
 - [Prompt template variables](#prompt-template-variables)
 - [MCP servers](#mcp-servers)
 - [Writing good tickets for agents](#writing-good-tickets-for-agents)
@@ -641,6 +642,47 @@ Each state can override these fields from the root `claude` / `hooks` defaults. 
 | `allowed_tools` | root value | Tool whitelist override |
 | `hooks` | root value | State-specific lifecycle hooks |
 
+#### Session modes: `inherit` vs `fresh`
+
+The `session` field controls whether the agent continues from a previous conversation or starts fresh:
+
+| Mode | Behavior | Use case |
+|------|----------|----------|
+| `inherit` (default) | The agent's `session_id` is preserved across runs. Claude Code receives `--resume <session_id>` on each turn, giving it full memory of prior conversation. | Most agent states — the agent remembers what it did in previous stages. |
+| `fresh` | A new session is created for this state. The agent has no memory of prior conversation. | Adversarial code review — a fresh perspective without bias from the implementation work. |
+
+**Example:** Use `session: fresh` for a code-review stage that should evaluate code objectively:
+
+```yaml
+states:
+  implement:
+    type: agent
+    prompt: prompts/implement.md
+    session: inherit        # agent remembers investigation
+
+  code_review:
+    type: agent
+    prompt: prompts/code-review.md
+    session: fresh          # fresh perspective, no prior context
+    runner: codex           # optional: different runner for independence
+```
+
+#### What the agent sees: context continuity
+
+When `session: inherit` (the default), the agent has **full conversation memory** from previous turns. This means:
+
+- It remembers its own work from earlier stages
+- It has already seen the issue description, investigation findings, etc.
+- Linear comments from prior runs are **not** re-sent (they're already in the conversation)
+
+**What about human comments?** The `recent_comments` variable in the lifecycle template includes:
+- All human comments posted to the Linear issue **after** the last Stokowski tracking comment
+- Stokowski tracking comments (`<!-- stokowski:state -->`, `<!-- stokowski:gate -->`, `<!-- stokowski:report -->`) are automatically excluded
+
+This ensures the agent sees:
+- New feedback from humans since its last run
+- But NOT its own previous reports (which would be redundant — they're already in the session memory)
+
 </details>
 
 ---
@@ -653,18 +695,18 @@ Agent prompts are assembled from three layers, each rendered as a [Jinja2](https
 2. **Stage prompt** (`states.<name>.prompt`) — stage-specific instructions (e.g. `prompts/investigate.md`)
 3. **Lifecycle injection** — auto-generated section with issue context, state transitions, rework comments, and recent activity
 
-All three layers receive the same template variables:
+All three layers receive the same template context with the `issue` object:
 
 | Variable | Description |
 |----------|-------------|
-| `{{ issue_identifier }}` | e.g. `ENG-42` |
-| `{{ issue_title }}` | Issue title |
-| `{{ issue_description }}` | Full issue description |
-| `{{ issue_state }}` | Current Linear state |
-| `{{ issue_priority }}` | `0` none · `1` urgent · `2` high · `3` medium · `4` low |
-| `{{ issue_labels }}` | List of label names (lowercase) |
-| `{{ issue_url }}` | Linear issue URL |
-| `{{ issue_branch }}` | Suggested git branch name |
+| `{{ issue.identifier }}` | e.g. `ENG-42` |
+| `{{ issue.title }}` | Issue title |
+| `{{ issue.description }}` | Full issue description |
+| `{{ issue.state }}` | Current Linear state |
+| `{{ issue.priority }}` | `0` none · `1` urgent · `2` high · `3` medium · `4` low |
+| `{{ issue.labels }}` | List of label names (lowercase) |
+| `{{ issue.url }}` | Linear issue URL |
+| `{{ issue.branch_name }}` | Suggested git branch name |
 | `{{ state_name }}` | Current state machine state (e.g. `investigate`, `implement`) |
 | `{{ run }}` | Run number for this state (increments on rework) |
 | `{{ attempt }}` | Retry attempt within this run |
@@ -682,7 +724,6 @@ The lifecycle section is appended automatically — you don't need to include it
 | `{{ transitions }}` | Dictionary mapping trigger names to target state names |
 | `{{ has_gate_transition }}` | `true` if any transition leads to a gate state |
 | `{{ gate_targets }}` | List of `(trigger, target)` tuples for gate transitions |
-| `{{ issue }}` | The full Issue object with all attributes |
 
 Use these to customize the lifecycle injection section that appears at the end of every agent prompt. See `prompts/lifecycle.md` for an example template.
 

@@ -54,9 +54,17 @@ Before submitting:
 1. Create a feature branch: `git checkout -b docs/{issue-branch}`
 2. Commit with a clear message: "docs: add [topic] documentation"
 3. Push the branch
-4. Open a PR using `gh pr create` with:
+4. Open a PR/MR:
+   ```bash
+   # GitHub
+   gh pr create --title "docs: ..." --body "..."
+
+   # GitLab
+   glab mr create --title "docs: ..." --description "..."
+   ```
+   Include:
    - Clear title prefixed with "docs:"
    - Brief description of changes
    - Link to the Linear issue
 
-Mark the task complete when the PR is open and the Linear issue is moved to the review state.
+Mark the task complete when the PR/MR is open and the Linear issue is moved to the review state.

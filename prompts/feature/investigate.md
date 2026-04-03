@@ -82,6 +82,21 @@ You are done investigating when:
 4. Your summary includes specific files, functions, and a concrete plan
 5. Any open questions are clearly documented
 
-Do NOT write any implementation code. Do NOT create branches or PRs. Your output is the investigation comment only.
+## Rework run
+
+If this is a rework run (the workspace already has investigation content):
+
+1. Read the review feedback from Linear comments.
+2. Read your prior investigation summary.
+3. Address the specific feedback — expand analysis, correct mistakes, or investigate additional areas as requested.
+4. Update the `## Investigation` comment with revised findings.
+5. Append a rework note to the Linear tracking comment.
+
+## Do NOT
+
+- Write implementation code
+- Create branches or PRs
+- Modify source files (reading is fine)
+- Skip the investigation to jump straight to coding
 
 Once posted, transition the issue to the "research-review" state and stop. A human will review your findings and either approve the approach or request clarification.

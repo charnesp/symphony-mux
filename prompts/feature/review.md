@@ -88,3 +88,23 @@ After posting your review:
 - If changes requested: remain in this state; the author will address and re-request review
 
 Do not merge directly — the `merge-review` gate provides a final checkpoint.
+
+## Rework run
+
+If this is a rework run (the review stage is being re-run after changes):
+
+1. Read your prior review from the Linear comments.
+2. Read the new commits since your last review:
+   ```
+   git log --oneline main..HEAD
+   ```
+3. Verify that previously raised issues have been addressed.
+4. Check for any new issues introduced by the rework.
+5. Post an updated `## Code Review` comment with your revised assessment.
+
+## Do NOT
+
+- Make code changes yourself — this is a review-only stage
+- Create or modify branches or PRs
+- Approve your own review without thorough examination
+- Rubber-stamp the PR without reading the full diff

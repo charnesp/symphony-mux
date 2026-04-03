@@ -58,8 +58,15 @@ Before marking complete, verify:
 1. Create a branch from main: `git checkout -b feature/your-change`
 2. Make focused commits with clear messages
 3. Push branch: `git push -u origin feature/your-change`
-4. Open PR with `gh pr create --title "..." --body "..."`
-5. Link PR to Linear issue in description: `Closes TEAM-123`
+4. Open PR/MR:
+   ```bash
+   # GitHub
+   gh pr create --title "..." --body "..."
+
+   # GitLab
+   glab mr create --title "..." --description "..."
+   ```
+5. Link PR/MR to Linear issue in description: `Closes TEAM-123`
 
 ## Completion Criteria
 
@@ -73,9 +80,40 @@ Mark this task complete when:
 
 Do NOT merge the PR yourself. Leave it in review state for human approval.
 
-## Notes
+## Rework run
 
-- If you discover the design is incomplete or unworkable, pause and comment on the Linear issue with findings
-- If scope creep emerges, document it in the PR description for discussion
-- Prefer small, reviewable PRs over large ones
-- When in doubt about patterns, examine the most recently modified files in the codebase
+If this is a rework run (a branch and PR already exist):
+
+1. Find the existing PR/MR:
+   ```bash
+   # GitHub
+   gh pr list --head <branch-name>
+
+   # GitLab
+   glab mr list --source-branch <branch-name>
+   ```
+2. Read review comments and requested changes:
+   ```bash
+   # GitHub
+   gh pr view <number> --comments
+
+   # GitLab
+   glab mr view <number> --comments
+   ```
+3. Address each piece of feedback specifically.
+4. Run the full quality suite again.
+5. Push new commits to the existing branch (do not force-push).
+6. Post a comment on the PR/MR summarising the rework:
+   - Which review comments were addressed
+   - What was modified
+   - Any decisions or trade-offs
+7. Append a rework section to the Linear tracking comment.
+
+## Do NOT
+
+- Create a new branch if one already exists for this issue
+- Open a second PR when one already exists
+- Force-push to the existing branch (use normal commits)
+- Skip the quality suite (tests, lint, type-check)
+- Merge your own PR without review approval
+- Leave the PR unlinked to the Linear issue
