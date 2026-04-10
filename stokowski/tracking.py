@@ -108,6 +108,32 @@ def parse_latest_tracking(comments: list[dict]) -> dict[str, Any] | None:
     return latest
 
 
+def parse_latest_gate_waiting(comments: list[dict]) -> dict[str, Any] | None:
+    """Return the most recent gate tracking payload with status "waiting".
+
+    Comments are expected oldest-first (Linear order). Later comments win so
+    the result is the chronologically last *waiting* gate, not the last gate
+    comment of any status (e.g. approved after waiting).
+    """
+    latest_waiting: dict[str, Any] | None = None
+
+    for comment in comments:
+        body = comment.get("body", "")
+        gate_match = GATE_PATTERN.search(body)
+        if not gate_match:
+            continue
+        try:
+            data = json.loads(gate_match.group(1))
+        except json.JSONDecodeError:
+            continue
+        if data.get("status") != "waiting":
+            continue
+        latest_waiting = dict(data)
+        latest_waiting["type"] = "gate"
+
+    return latest_waiting
+
+
 def get_last_tracking_timestamp(comments: list[dict]) -> str | None:
     """Find the timestamp of the latest tracking comment."""
     latest_ts: str | None = None
