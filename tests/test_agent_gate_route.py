@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import json
 
+import pytest
+
 from stokowski.agent_gate_route import (
     ROUTE_END,
     ROUTE_START,
@@ -90,6 +92,58 @@ class TestDecideAgentGateTransition:
         key, err = decide_agent_gate_transition(out, cfg)
         assert key == "first"
         assert err is not None
+
+
+class TestDecideFromClaudeNdjson:
+    """Routing markers inside JSON string fields must use decoded text, not raw NDJSON."""
+
+    def test_stream_json_result_field_parses_transition(self):
+        cfg = _gate_state_cfg()
+        visible = (
+            "<stokowski:report>ok</stokowski:report>\n\n"
+            "<<<STOKOWSKI_ROUTE>>>\n"
+            '{"transition": "pick_a"}\n'
+            "<<<END_STOKOWSKI_ROUTE>>>"
+        )
+        result_line = json.dumps({"type": "result", "result": visible})
+        key, err = decide_agent_gate_transition(result_line, cfg)
+        assert key == "pick_a"
+        assert err is None
+
+    def test_stream_json_assistant_text_parses_transition(self):
+        cfg = _gate_state_cfg()
+        visible = ROUTE_WRAP % "pick_b"
+        assistant_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": visible}],
+                },
+            }
+        )
+        key, err = decide_agent_gate_transition(assistant_line, cfg)
+        assert key == "pick_b"
+        assert err is None
+
+    def test_raw_ndjson_slice_between_markers_is_not_valid_json_without_decode(self):
+        """Regression: substring on wire has escaped quotes; decoded text is required."""
+        cfg = _gate_state_cfg()
+        visible = ROUTE_WRAP % "pick_a"
+        wire = json.dumps({"type": "result", "result": visible})
+        # Between markers on the raw line, inner is \\n{\"transition\"... — not parseable JSON
+        start = wire.index(ROUTE_START) + len(ROUTE_START)
+        end = wire.index(ROUTE_END, start)
+        inner = wire[start:end].strip()
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(inner)
+
+    def test_plain_text_routing_still_works(self):
+        cfg = _gate_state_cfg()
+        out = "preamble\n" + ROUTE_WRAP % "pick_a"
+        key, err = decide_agent_gate_transition(out, cfg)
+        assert key == "pick_a"
+        assert err is None
 
 
 class TestFormatRouteErrorComment:

@@ -15,6 +15,7 @@ from typing import Any
 
 from .config import ClaudeConfig, HooksConfig
 from .models import Issue, RunAttempt
+from .workspace import sanitize_key
 
 logger = logging.getLogger("stokowski.runner")
 
@@ -26,6 +27,74 @@ PidCallback = Callable[[int, bool], None]  # (pid, is_register)
 # Report validation marker
 REPORT_START_TAG = "<stokowski:report>"
 REPORT_END_TAG = "</stokowski:report>"
+
+
+def _utc_log_timestamp_fragment(at: datetime) -> str:
+    """UTC timestamp safe for filenames (no colons)."""
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    else:
+        at = at.astimezone(UTC)
+    return at.strftime("%Y%m%dT%H%M%S_%f")
+
+
+def write_claude_agent_output_log(
+    log_dir: Path,
+    *,
+    issue_identifier: str,
+    state_name: str | None,
+    run_num: int,
+    turn_count: int,
+    full_output: str,
+    at: datetime | None = None,
+) -> Path:
+    """Write captured Claude stdout (NDJSON lines joined) to a file under ``log_dir``.
+
+    Filenames use sanitized issue id and state, run/turn indices, and a UTC timestamp
+    so logs are safe on all platforms and do not overwrite prior captures.
+    """
+    ts = _utc_log_timestamp_fragment(at or datetime.now(UTC))
+    safe_id = sanitize_key(issue_identifier)
+    safe_state = sanitize_key(state_name or "unknown")
+    name = f"{safe_id}__{safe_state}__run{run_num}_turn{turn_count}__{ts}.log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = log_dir / name
+    path.write_text(full_output, encoding="utf-8")
+    return path
+
+
+def _maybe_log_claude_agent_output(
+    log_dir: Path | None, issue: Issue, attempt: RunAttempt
+) -> None:
+    """If ``log_dir`` is set, persist ``attempt.full_output`` and log path + DEBUG preview."""
+    if log_dir is None:
+        return
+    try:
+        run_num = int(attempt.attempt or 1)
+        path = write_claude_agent_output_log(
+            log_dir,
+            issue_identifier=issue.identifier,
+            state_name=attempt.state_name,
+            run_num=run_num,
+            turn_count=attempt.turn_count,
+            full_output=attempt.full_output or "",
+        )
+        out_len = len(attempt.full_output or "")
+        logger.info(
+            "Claude agent output for issue=%s written to %s (%d bytes)",
+            issue.identifier,
+            path,
+            out_len,
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            preview = (attempt.full_output or "")[:4000]
+            logger.debug("Claude agent output preview (first 4000 chars):\n%s", preview)
+    except OSError as e:
+        logger.warning(
+            "Could not write Claude agent output log for issue=%s: %s",
+            issue.identifier,
+            e,
+        )
 
 
 def validate_agent_output(output_text: str | None) -> tuple[bool, str | None]:
@@ -345,6 +414,7 @@ async def run_agent_turn(
     on_event: EventCallback | None = None,
     on_pid: PidCallback | None = None,
     env: dict[str, str] | None = None,
+    log_agent_output_dir: Path | None = None,
 ) -> RunAttempt:
     """Run a single Claude Code turn. Returns updated RunAttempt."""
     args = build_claude_args(claude_cfg, workspace_path, attempt.session_id)
@@ -370,6 +440,7 @@ async def run_agent_turn(
     attempt.status = "streaming"
     attempt.started_at = attempt.started_at or datetime.now(UTC)
     attempt.turn_count += 1
+    attempt.full_output = ""
     attempt.last_event_at = datetime.now(UTC)
 
     try:
@@ -407,29 +478,33 @@ async def run_agent_turn(
 
     async def read_stream():
         nonlocal last_activity
-        output_lines = []
-        while proc.stdout:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            last_activity = loop.time()
-            attempt.last_event_at = datetime.now(UTC)
+        output_lines: list[str] = []
+        try:
+            while proc.stdout:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                last_activity = loop.time()
+                attempt.last_event_at = datetime.now(UTC)
 
-            line_str = line.decode().strip()
-            output_lines.append(line_str)
-            if not line_str:
-                continue
+                line_str = line.decode().strip()
+                output_lines.append(line_str)
+                if not line_str:
+                    continue
 
-            try:
-                event = json.loads(line_str)
-            except json.JSONDecodeError:
-                continue
+                try:
+                    event = json.loads(line_str)
+                except json.JSONDecodeError:
+                    continue
 
-            _process_event(event, attempt, on_event, issue.identifier)
-        attempt.full_output = "\n".join(output_lines)
-        logger.debug(
-            f"Captured full_output for {issue.identifier}: {len(attempt.full_output)} chars"
-        )
+                _process_event(event, attempt, on_event, issue.identifier)
+        finally:
+            attempt.full_output = "\n".join(output_lines)
+            logger.debug(
+                "Captured full_output for %s: %d chars",
+                issue.identifier,
+                len(attempt.full_output),
+            )
 
     async def stall_monitor():
         while proc.returncode is None:
@@ -442,13 +517,16 @@ async def run_agent_turn(
                 attempt.error = f"No output for {elapsed:.0f}s"
                 return
 
+    reader_task: asyncio.Task[None] | None = None
+    monitor_task: asyncio.Task[None] | None = None
+    stream_exc: BaseException | None = None
     try:
-        reader = asyncio.create_task(read_stream())
-        monitor = asyncio.create_task(stall_monitor())
+        reader_task = asyncio.create_task(read_stream())
+        monitor_task = asyncio.create_task(stall_monitor())
 
         # Overall turn timeout
         done, pending = await asyncio.wait(
-            {reader, monitor},
+            {reader_task, monitor_task},
             timeout=turn_timeout_s,
             return_when=asyncio.FIRST_COMPLETED,
         )
@@ -456,12 +534,24 @@ async def run_agent_turn(
         if not done:
             # Turn timeout
             logger.warning(f"Turn timeout issue={issue.identifier}")
-            proc.kill()
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
             attempt.status = "timed_out"
             attempt.error = f"Turn exceeded {turn_timeout_s}s"
         else:
-            # Wait for process to finish
-            await asyncio.wait_for(proc.wait(), timeout=30)
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=30)
+            except TimeoutError:
+                logger.warning(
+                    "Claude subprocess wait timed out issue=%s", issue.identifier
+                )
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                if attempt.status == "streaming":
+                    attempt.status = "failed"
+                    attempt.error = (
+                        "Claude subprocess did not exit within 30s after stream ended"
+                    )
 
         for task in pending:
             task.cancel()
@@ -469,10 +559,21 @@ async def run_agent_turn(
                 await task
 
     except Exception as e:
+        stream_exc = e
         logger.error(f"Runner error issue={issue.identifier}: {e}")
-        proc.kill()
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
         attempt.status = "failed"
         attempt.error = str(e)
+    finally:
+        for t in (reader_task, monitor_task):
+            if t is not None and not t.done():
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t
+
+    if stream_exc is not None:
+        _maybe_log_claude_agent_output(log_agent_output_dir, issue, attempt)
         return attempt
 
     # Determine final status from exit code and validate report
@@ -483,6 +584,7 @@ async def run_agent_turn(
             stderr_output = stderr_bytes.decode()[:500]
         except (TimeoutError, Exception):
             pass
+    _maybe_log_claude_agent_output(log_agent_output_dir, issue, attempt)
     _finalize_attempt(attempt, proc.returncode, stderr_output, issue.identifier)
 
     # Run after_run hook
@@ -844,6 +946,7 @@ async def run_turn(
     on_event: EventCallback | None = None,
     on_pid: PidCallback | None = None,
     env: dict[str, str] | None = None,
+    log_agent_output_dir: Path | None = None,
 ) -> RunAttempt:
     """Route to the correct runner based on runner_type."""
     if runner_type == "codex":
@@ -883,6 +986,7 @@ async def run_turn(
             on_event=on_event,
             on_pid=on_pid,
             env=env,
+            log_agent_output_dir=log_agent_output_dir,
         )
     else:
         raise ValueError(f"Unknown runner type: {runner_type}")

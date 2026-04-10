@@ -1,6 +1,6 @@
 # Implement State
 
-Your task is to implement the approved design and bring it to completion through a pull request.
+Your task is to implement the approved design in the workspace **up to the implementation-review gate**. Do **not** push to the remote or open a PR/MR from this stage — that happens later, when the workflow is ready for human **merge-review** (see `review-findings-route`).
 
 ## Implementation Guidelines
 
@@ -31,7 +31,7 @@ All code changes must include tests:
 - Test actual subprocess calls where relevant
 - Include at least one full workflow test
 
-Run tests before committing: `uv run pytest tests/ -v`
+Run tests frequently: `uv run pytest tests/ -v`. You may use local `git commit` on a feature branch for your own checkpoints; do not push or open a PR/MR until the merge-review prep step.
 
 ### Documentation Requirements
 
@@ -40,7 +40,7 @@ Run tests before committing: `uv run pytest tests/ -v`
 - Keep inline comments minimal but meaningful
 - Ensure error messages are actionable for operators
 
-## PR Checklist
+## Quality checklist
 
 Before marking complete, verify:
 
@@ -49,24 +49,15 @@ Before marking complete, verify:
 - [ ] No new lint errors (`uv run ruff check`)
 - [ ] Type checking passes (`uv run pyright`)
 - [ ] Security scan clean (`uv run bandit -r stokowski/`)
-- [ ] Branch follows naming convention: `feature/description` or `fix/description`
-- [ ] Commit messages are clear and descriptive
-- [ ] PR description explains what and why, references Linear issue
+- [ ] Local branch follows naming convention: `feature/description` or `fix/description` (for when the PR is opened later)
+- [ ] Commit messages are clear and descriptive (local commits only)
 
-## Git Workflow
+## Local git (no push / no PR from this stage)
 
-1. Create a branch from main: `git checkout -b feature/your-change`
-2. Make focused commits with clear messages
-3. Push branch: `git push -u origin feature/your-change`
-4. Open PR/MR:
-   ```bash
-   # GitHub
-   gh pr create --title "..." --body "..."
-
-   # GitLab
-   glab mr create --title "..." --description "..."
-   ```
-5. Link PR/MR to Linear issue in description: `Closes TEAM-123`
+1. Work on a branch: `git checkout -b feature/your-change` (or continue the existing branch for this issue)
+2. Make focused local commits with clear messages
+3. **Do not** `git push` to open a remote branch for review yet
+4. **Do not** open a PR/MR — that is done in the **merge-review prep** step (`review-findings-route` when routing `clean` or `needs_human`)
 
 ## Completion Criteria
 
@@ -74,46 +65,24 @@ Mark this task complete when:
 
 1. All acceptance criteria from the design are implemented
 2. Tests are written and passing
-3. PR is opened and linked to the Linear issue
-4. CI checks pass (if configured)
-5. No critical security or performance concerns remain
+3. Changes are committed **locally** on the feature branch (ready for later push when merge-review prep runs)
+4. No critical security or performance concerns remain
 
-Do NOT merge the PR yourself. Leave it in review state for human approval.
+Do **not** merge. The next human gate is **implementation-review**; PR/MR creation waits until the workflow is ready for **merge-review**.
 
 ## Rework run
 
-If this is a rework run (a branch and PR already exist):
+If this is a rework run after **implementation-review** requested changes:
 
-1. Find the existing PR/MR:
-   ```bash
-   # GitHub
-   gh pr list --head <branch-name>
-
-   # GitLab
-   glab mr list --source-branch <branch-name>
-   ```
-2. Read review comments and requested changes:
-   ```bash
-   # GitHub
-   gh pr view <number> --comments
-
-   # GitLab
-   glab mr view <number> --comments
-   ```
-3. Address each piece of feedback specifically.
-4. Run the full quality suite again.
-5. Push new commits to the existing branch (do not force-push).
-6. Post a comment on the PR/MR summarising the rework:
-   - Which review comments were addressed
-   - What was modified
-   - Any decisions or trade-offs
-7. Append a rework section to the Linear tracking comment.
+1. Read the review feedback in Linear (and in your `<stokowski:report>` / issue thread context).
+2. Address each point specifically on the existing local feature branch.
+3. Run the full quality suite again.
+4. Add new local commits (do not force-push). Implementation rework stays local until **`review-findings-route`** opens the PR for merge-review.
 
 ## Do NOT
 
 - Create a new branch if one already exists for this issue
-- Open a second PR when one already exists
-- Force-push to the existing branch (use normal commits)
+- Push to origin or open a PR/MR from this stage
+- Force-push (use normal commits)
 - Skip the quality suite (tests, lint, type-check)
-- Merge your own PR without review approval
-- Leave the PR unlinked to the Linear issue
+- Merge

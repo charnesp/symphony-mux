@@ -30,10 +30,11 @@ Follow this progression for every feature:
 - Test the complete user journey, not just the happy path
 
 ### 4. Review and Merge
-- Prepare a clear summary of changes
-- Ensure all CI checks pass
+- Automated code review runs **before** a PR/MR is opened; the PR/MR is created when the workflow is ready for human **merge-review** (see `review-findings-route`)
+- Prepare a clear summary of changes for reviewers
+- Ensure CI passes on the PR once it exists
 - Address feedback from maintainers
-- Merge only when approved and ready
+- Merge only when approved and ready (merge agent stage)
 
 ## Quality Standards
 
@@ -92,7 +93,7 @@ A feature is complete when:
 - Code follows project conventions
 - Tests pass and coverage is adequate
 - Documentation is updated
-- Reviewers have approved
+- Reviewers have approved (including merge-review)
 - The change is merged cleanly
 
 Your work matters. Build something you and your teammates will be proud to maintain.

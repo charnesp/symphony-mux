@@ -234,8 +234,12 @@ def _make_footer(orch: Orchestrator) -> Text:
     )
 
 
-async def run_orchestrator(workflow_path: str, port: int | None = None):
-    orch = Orchestrator(workflow_path)
+async def run_orchestrator(
+    workflow_path: str,
+    port: int | None = None,
+    log_agent_output_dir: Path | None = None,
+):
+    orch = Orchestrator(workflow_path, log_agent_output_dir=log_agent_output_dir)
     loop = asyncio.get_running_loop()
 
     # Start keyboard handler
@@ -269,10 +273,16 @@ async def run_orchestrator(workflow_path: str, port: int | None = None):
 
     await check_for_updates()
 
+    log_line = ""
+    if log_agent_output_dir is not None:
+        log_line = (
+            f"\n[dim]Claude runner only — stdout capture logs (Mux/Codex not logged):[/dim] "
+            f"{log_agent_output_dir}"
+        )
     console.print(
         Panel(
             f"[bold]Stokowski[/bold]  [dim]Claude Code Orchestrator[/dim]\n"
-            f"[dim]workflow:[/dim] {workflow_path}",
+            f"[dim]workflow:[/dim] {workflow_path}{log_line}",
             border_style="dim",
         )
     )
@@ -333,6 +343,19 @@ def cli():
         action="store_true",
         help="Validate config and show candidates without dispatching",
     )
+    parser.add_argument(
+        "--log-agent-output",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Claude runner only (ignored for Mux/Codex): write each turn's captured stdout "
+            "(NDJSON lines) to a timestamped .log file under DIR. "
+            "If DIR is omitted, uses ./.stokowski/agent-output. "
+            "Use with -v for a DEBUG preview (first 4000 chars) in the console."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -353,11 +376,24 @@ def cli():
     _load_dotenv()
     setup_logging(args.verbose)
 
+    log_agent_output: Path | None = None
+    if args.log_agent_output is not None:
+        if args.log_agent_output == "":
+            log_agent_output = (Path.cwd() / ".stokowski" / "agent-output").resolve()
+        else:
+            log_agent_output = Path(args.log_agent_output).expanduser().resolve()
+
     if args.dry_run:
         asyncio.run(dry_run(args.workflow))
     else:
         try:
-            asyncio.run(run_orchestrator(args.workflow, args.port))
+            asyncio.run(
+                run_orchestrator(
+                    args.workflow,
+                    args.port,
+                    log_agent_output_dir=log_agent_output,
+                )
+            )
         except KeyboardInterrupt:
             console.print("\n[yellow]Interrupted — killing all agents...[/yellow]")
             _force_kill_children()

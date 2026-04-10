@@ -953,7 +953,7 @@ wheels = [
 [[package]]
 name = "stokowski"
 version = "0.4.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -996,7 +996,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'test'", specifier = ">=0.15" },
     { name = "uvicorn", specifier = ">=0.32" },
 ]
-provides-extras = ["test"]
+provides-extras = ["web", "test"]
 
 [package.metadata.requires-dev]
 dev = [

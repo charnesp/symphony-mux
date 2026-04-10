@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "stokowski"
 version = "0.4.0"
@@ -16,6 +20,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Web dashboard deps (fastapi, uvicorn) are in core `dependencies`; this extra exists so
+# `uv sync --extra web` matches docs and no-ops instead of erroring.
+web = []
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

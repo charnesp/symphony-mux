@@ -40,9 +40,14 @@ logger = logging.getLogger("stokowski")
 
 
 class Orchestrator:
-    def __init__(self, workflow_path: str | Path):
+    def __init__(
+        self,
+        workflow_path: str | Path,
+        log_agent_output_dir: Path | None = None,
+    ):
         self.workflow_path = Path(workflow_path)
         self.workflow: WorkflowDefinition | None = None
+        self._log_agent_output_dir = log_agent_output_dir
 
         # Runtime state
         self.running: dict[str, RunAttempt] = {}  # issue_id -> RunAttempt
@@ -1203,6 +1208,7 @@ class Orchestrator:
                     on_event=self._on_agent_event,
                     on_pid=self._on_child_pid,
                     env=agent_env,
+                    log_agent_output_dir=self._log_agent_output_dir,
                 )
             else:
                 # Legacy mode: multi-turn loop
@@ -1244,6 +1250,7 @@ class Orchestrator:
                         on_event=self._on_agent_event,
                         on_pid=self._on_child_pid,
                         env=agent_env,
+                        log_agent_output_dir=self._log_agent_output_dir,
                     )
 
                     if attempt.status != "succeeded":

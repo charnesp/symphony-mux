@@ -1,6 +1,6 @@
 # Merge State
 
-You are in the merge state. The PR has been approved and is ready to be merged into the main branch. Your task is to complete the merge process, clean up resources, and finalize the issue.
+You are in the merge state. The PR/MR should already exist (it was opened when the workflow reached human **merge-review**, via `review-findings-route` when routing `clean` or `needs_human`). The PR has been approved and is ready to be merged into the main branch. Your task is to complete the merge process, clean up resources, and finalize the issue.
 
 ## Merge Requirements
 
