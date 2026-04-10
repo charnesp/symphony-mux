@@ -128,7 +128,6 @@ class TestDecideFromClaudeNdjson:
 
     def test_raw_ndjson_slice_between_markers_is_not_valid_json_without_decode(self):
         """Regression: substring on wire has escaped quotes; decoded text is required."""
-        cfg = _gate_state_cfg()
         visible = ROUTE_WRAP % "pick_a"
         wire = json.dumps({"type": "result", "result": visible})
         # Between markers on the raw line, inner is \\n{\"transition\"... — not parseable JSON

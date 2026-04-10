@@ -31,10 +31,7 @@ REPORT_END_TAG = "</stokowski:report>"
 
 def _utc_log_timestamp_fragment(at: datetime) -> str:
     """UTC timestamp safe for filenames (no colons)."""
-    if at.tzinfo is None:
-        at = at.replace(tzinfo=UTC)
-    else:
-        at = at.astimezone(UTC)
+    at = at.replace(tzinfo=UTC) if at.tzinfo is None else at.astimezone(UTC)
     return at.strftime("%Y%m%dT%H%M%S_%f")
 
 
@@ -63,9 +60,7 @@ def write_claude_agent_output_log(
     return path
 
 
-def _maybe_log_claude_agent_output(
-    log_dir: Path | None, issue: Issue, attempt: RunAttempt
-) -> None:
+def _maybe_log_claude_agent_output(log_dir: Path | None, issue: Issue, attempt: RunAttempt) -> None:
     """If ``log_dir`` is set, persist ``attempt.full_output`` and log path + DEBUG preview."""
     if log_dir is None:
         return
@@ -542,16 +537,12 @@ async def run_agent_turn(
             try:
                 await asyncio.wait_for(proc.wait(), timeout=30)
             except TimeoutError:
-                logger.warning(
-                    "Claude subprocess wait timed out issue=%s", issue.identifier
-                )
+                logger.warning("Claude subprocess wait timed out issue=%s", issue.identifier)
                 with contextlib.suppress(ProcessLookupError):
                     proc.kill()
                 if attempt.status == "streaming":
                     attempt.status = "failed"
-                    attempt.error = (
-                        "Claude subprocess did not exit within 30s after stream ended"
-                    )
+                    attempt.error = "Claude subprocess did not exit within 30s after stream ended"
 
         for task in pending:
             task.cancel()
