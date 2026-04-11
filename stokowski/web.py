@@ -20,8 +20,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stokowski</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script>
   (function() {
     var theme = localStorage.getItem('stokowski-theme');
@@ -31,6 +29,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     document.documentElement.setAttribute('data-theme', theme);
   })();
 </script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -94,8 +94,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     transition: opacity 0.25s ease;
   }
 
-  [data-theme="light"] body::before,
-  body[data-theme="light"]::before {
+  [data-theme="light"] body::before {
     opacity: 0.2;
   }
 
@@ -191,7 +190,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   .theme-toggle:focus-visible {
     outline: 2px solid var(--amber);
-    outline-offset: 2px;
+    outline-offset: 1px;
   }
 
   /* ── Metrics row ── */
@@ -302,7 +301,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
 
   .agent-card:hover {
-    background: var(--border);
+    background: var(--surface);
+    filter: brightness(1.15);
+  }
+
+  [data-theme="light"] .agent-card:hover {
+    filter: brightness(0.95);
   }
 
   .agent-id {
@@ -397,7 +401,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   .empty-sub {
     font-size: 11px;
-    color: var(--border-hi);
+    color: var(--muted);
     font-weight: 300;
   }
 
@@ -691,7 +695,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   function updateToggleIcon() {
     var current = document.documentElement.getAttribute('data-theme') || 'dark';
-    themeBtn.innerHTML = current === 'light' ? moonIcon : sunIcon;
+    // Show sun in dark mode (switch to light), moon in light mode (switch to dark)
+    themeBtn.innerHTML = current === 'dark' ? sunIcon : moonIcon;
   }
 
   themeBtn.addEventListener('click', function() {
