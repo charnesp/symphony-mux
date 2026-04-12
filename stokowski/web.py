@@ -691,7 +691,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   // ── Theme toggle ──
   var themeBtn = document.getElementById('theme-toggle');
   var sunIcon = '\u2600';   // ☀
-  var moonIcon = '\u263E';  // ☾
+  var moonIcon = '\u263e';  // ☾
 
   function updateToggleIcon() {
     var current = document.documentElement.getAttribute('data-theme') || 'dark';
