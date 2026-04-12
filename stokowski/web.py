@@ -20,6 +20,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Stokowski</title>
+<script>
+  (function() {
+    var theme = localStorage.getItem('stokowski-theme');
+    if (!theme) {
+      theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', theme);
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -41,6 +50,21 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     --font:      'IBM Plex Mono', monospace;
   }
 
+  [data-theme="light"] {
+    --bg:        #f5f5f5;
+    --surface:   #ffffff;
+    --border:    #e0e0e0;
+    --border-hi: #d0d0d0;
+    --text:      #1a1a1a;
+    --muted:     #666666;
+    --dim:       #999999;
+    --amber:     #c99a2e;
+    --amber-dim: #a07820;
+    --green:     #3a9a5e;
+    --red:       #c44a42;
+    --blue:      #4580d4;
+  }
+
   html, body {
     background: var(--bg);
     color: var(--text);
@@ -49,6 +73,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     line-height: 1.5;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
+  }
+
+  html, body, .metric, .agent-card, .empty, .status-pill, .progress-wrap, footer {
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
   }
 
   /* Subtle grid background */
@@ -63,6 +91,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     opacity: 0.35;
     pointer-events: none;
     z-index: 0;
+    transition: opacity 0.25s ease;
+  }
+
+  [data-theme="light"] body::before {
+    opacity: 0.2;
   }
 
   .shell {
@@ -135,6 +168,29 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     color: var(--muted);
     font-weight: 300;
     letter-spacing: 0.04em;
+  }
+
+  /* ── Theme toggle ── */
+  .theme-toggle {
+    background: none;
+    border: 1px solid var(--border-hi);
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 14px;
+    line-height: 1;
+    transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease;
+  }
+
+  .theme-toggle:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+
+  .theme-toggle:focus-visible {
+    outline: 2px solid var(--amber);
+    outline-offset: 1px;
   }
 
   /* ── Metrics row ── */
@@ -245,7 +301,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   }
 
   .agent-card:hover {
-    background: #141414;
+    background: var(--surface);
+    filter: brightness(1.15);
+  }
+
+  [data-theme="light"] .agent-card:hover {
+    filter: brightness(0.95);
   }
 
   .agent-id {
@@ -340,7 +401,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   .empty-sub {
     font-size: 11px;
-    color: var(--border-hi);
+    color: var(--muted);
     font-weight: 300;
   }
 
@@ -434,6 +495,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <span class="logo-tag">Claude Code Orchestrator</span>
     </div>
     <div class="header-right">
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Toggle theme">&#9790;</button>
       <div id="status-dot" class="status-dot idle"></div>
       <span id="ts" class="timestamp">—</span>
     </div>
@@ -625,6 +687,27 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   refresh();
   setInterval(refresh, 3000);
+
+  // ── Theme toggle ──
+  var themeBtn = document.getElementById('theme-toggle');
+  var sunIcon = '\u2600';   // ☀
+  var moonIcon = '\u263E';  // ☾
+
+  function updateToggleIcon() {
+    var current = document.documentElement.getAttribute('data-theme') || 'dark';
+    // Show sun in dark mode (switch to light), moon in light mode (switch to dark)
+    themeBtn.innerHTML = current === 'dark' ? sunIcon : moonIcon;
+  }
+
+  themeBtn.addEventListener('click', function() {
+    var current = document.documentElement.getAttribute('data-theme') || 'dark';
+    var next = current === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('stokowski-theme', next);
+    updateToggleIcon();
+  });
+
+  updateToggleIcon();
 </script>
 </body>
 </html>
