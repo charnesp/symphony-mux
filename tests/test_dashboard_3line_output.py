@@ -103,9 +103,7 @@ class TestDashboardAgentMsgCSS:
         msg_match = re.search(r"\.agent-msg\s*\{([^}]+)\}", DASHBOARD_HTML, re.DOTALL)
         assert msg_match is not None
         css = msg_match.group(1)
-        assert "-webkit-box" in css, (
-            ".agent-msg missing display: -webkit-box for line clamping"
-        )
+        assert "-webkit-box" in css, ".agent-msg missing display: -webkit-box for line clamping"
 
     def test_agent_msg_no_max_width(self):
         """.agent-msg should NOT have max-width (the grid column constrains width)."""
