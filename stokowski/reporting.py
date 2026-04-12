@@ -10,11 +10,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .models import Issue
 
-# Pattern to extract stokowski report blocks
-REPORT_PATTERN = re.compile(
-    r"\u003cstokowski:report\u003e(.*?)\u003c/stokowski:report\u003e",
-    re.DOTALL | re.IGNORECASE,
-)
+# Opening / closing tags (case-insensitive matching via separate patterns)
+REPORT_OPEN_PATTERN = re.compile(r"<stokowski:report>", re.IGNORECASE)
+REPORT_CLOSE_PATTERN = re.compile(r"</stokowski:report>", re.IGNORECASE)
 
 APPROVAL_SECTION_PATTERN = re.compile(
     r"(?:##|###)\s*(?:Approval Required|Éléments? à valider|Items? (?:Needing|Requiring) Approval)",
@@ -25,19 +23,32 @@ APPROVAL_SECTION_PATTERN = re.compile(
 def extract_report(agent_output: str) -> str | None:
     """Extract the stokowski report from agent output.
 
+    Stream-json ``full_output`` is often the entire NDJSON log joined with newlines.
+    Models may mention ``<stokowski:report>`` earlier (e.g. in a *thinking* block) without
+    intending a real tag. Taking the *first* open + *first* close would then span the
+    whole stream. We use the **last** closing tag and the **last** opening tag before it.
+
     Args:
         agent_output: The full text output from the agent.
 
     Returns:
         The content inside <stokowski:report> tags, or None if not found.
     """
-    match = REPORT_PATTERN.search(agent_output)
-    if not match:
+    if not agent_output:
         return None
-    content = match.group(1).strip()
-    # Convert escaped newlines to actual newlines
-    content = content.replace("\\n", "\n")
-    return content
+    close_matches = list(REPORT_CLOSE_PATTERN.finditer(agent_output))
+    if not close_matches:
+        return None
+    for close_m in reversed(close_matches):
+        prefix = agent_output[: close_m.start()]
+        open_matches = list(REPORT_OPEN_PATTERN.finditer(prefix))
+        if not open_matches:
+            continue
+        last_open = open_matches[-1]
+        content = agent_output[last_open.end() : close_m.start()].strip()
+        content = content.replace("\\n", "\n")
+        return content
+    return None
 
 
 def has_approval_section(report_content: str) -> bool:

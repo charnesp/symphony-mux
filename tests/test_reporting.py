@@ -29,6 +29,25 @@ def test_extract_report_finds_tag():
     assert "Implemented feature X" in result
 
 
+def test_extract_report_prefers_last_pair_when_tag_mentioned_in_thinking():
+    """NDJSON logs may mention <stokowski:report> in thinking before the real block."""
+    # Mimics stream-json full_output: early line cites the tag, then tool noise, then real report
+    agent_output = (
+        '{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"See '
+        'prior `<stokowski:report>` for details."}]}}\n'
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash"}]}}\n'
+        '{"type":"user","message":{"content":"stdout..."}}\n'
+        '<stokowski:report>\n## Summary\n- Real report only\n</stokowski:report>\n'
+    )
+
+    result = extract_report(agent_output)
+
+    assert result is not None
+    assert "Real report only" in result
+    assert "stdout" not in result
+    assert "tool_use" not in result
+
+
 def test_has_approval_section_detects_approval():
     """Detect when report contains approval section."""
     with_approval = "## Summary\n\n## Approval Required\nCheck this"
