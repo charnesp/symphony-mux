@@ -1,6 +1,6 @@
 # Implement State
 
-Your task is to implement the approved design in the workspace **up to the implementation-review gate**. Do **not** push to the remote or open a PR/MR from this stage — that happens later, when the workflow is ready for human **merge-review** (see `review-findings-route`).
+Your task is to implement the approved design in the workspace **before automated code-review** (`code-review` state). Do **not** push to the remote or open a PR/MR from this stage — that happens later, when the workflow is ready for human **merge-review** (see `review-findings-route`).
 
 ## OpenSpec (required)
 
@@ -93,11 +93,11 @@ Mark this task complete when:
 3. Changes are committed **locally** on the feature branch (ready for later push when merge-review prep runs)
 4. No critical security or performance concerns remain
 
-Do **not** merge. The next human gate is **implementation-review**; PR/MR creation waits until the workflow is ready for **merge-review**.
+Do **not** merge. After you finish, Stokowski advances to **code-review** (agent); PR/MR creation waits until the workflow is ready for **merge-review** (human gate).
 
 ## Rework run
 
-If this is a rework run after **implementation-review** requested changes:
+If this is a rework run (e.g. **merge-review** sent the issue back to **implement**, or similar):
 
 1. Read the review feedback in Linear (and in your `<stokowski:report>` / issue thread context).
 2. Address each point specifically on the existing local feature branch.

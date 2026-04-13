@@ -202,15 +202,7 @@ workflows:
         max_turns: 30
         session: fresh
         transitions:
-          complete: implementation-review
-
-      implementation-review:
-        type: gate
-        linear_state: review
-        rework_to: implement
-        max_rework: 5
-        transitions:
-          approve: code-review
+          complete: code-review
 
       code-review:
         type: agent
