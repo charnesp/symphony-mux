@@ -63,7 +63,7 @@ def test_get_comments_since_includes_undated_human_when_no_since_bound():
 
 def test_get_comments_since_excludes_tracking_case_insensitive_prefix():
     comments = [
-        {"body": "<!-- Stokowski:state {\"state\": \"s\"} -->", "createdAt": "2026-01-01T00:00:00Z"},
+        {"body": '<!-- Stokowski:state {"state": "s"} -->', "createdAt": "2026-01-01T00:00:00Z"},
         {"body": "Human note", "createdAt": "2026-01-02T00:00:00Z"},
     ]
     out = get_comments_since(comments, None)
@@ -77,10 +77,7 @@ def test_parse_latest_tracking_state_gate_tie_same_effective_time_last_in_body_w
         f'<!-- stokowski:state {{"state": "s", "run": 1, "timestamp": "{ts}"}} -->'
         f'<!-- stokowski:gate {{"state": "g", "status": "waiting", "run": 1, "timestamp": "{ts}"}} -->'
     )
-    got = parse_latest_tracking(
-        [{"body": body, "createdAt": "2026-03-01T10:00:00.000Z"}]
-    )
+    got = parse_latest_tracking([{"body": body, "createdAt": "2026-03-01T10:00:00.000Z"}])
     assert got is not None
     assert got["type"] == "gate"
     assert got["state"] == "g"
-
