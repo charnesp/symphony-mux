@@ -1634,7 +1634,9 @@ class Orchestrator:
             and attempt.state_name in states_to_check
         )
 
-        # Post work report (async) — agent-gate success uses _finalize_agent_gate_turn instead
+        # Post work report (async) — agent-gate success uses _finalize_agent_gate_turn instead.
+        # Omit for timed_out / stalled: the turn did not finish; we retry and do not post a Work
+        # Report to Linear (operators should use logs or --log-agent-output for partial output).
         skip_work_report = (
             workflow_unresolved or workflow_config_error_exit
         ) and attempt.status in (
@@ -1643,7 +1645,12 @@ class Orchestrator:
             "timed_out",
             "stalled",
         )
-        if attempt.full_output and not agent_gate_finalize and not skip_work_report:
+        if (
+            attempt.full_output
+            and not agent_gate_finalize
+            and not skip_work_report
+            and attempt.status not in ("timed_out", "stalled")
+        ):
             asyncio.create_task(self._post_work_report(issue, attempt, attempt.state_name))
 
         self.running.pop(issue.id, None)

@@ -224,7 +224,7 @@ workflows:
         type: agent
         prompt: prompts/feature/investigate.md
         linear_state: active
-        model: glm-5.1:cloud
+        model: kimi-k2.5:cloud
         max_turns: 8
         session: inherit
         transitions:
@@ -242,7 +242,7 @@ workflows:
         type: agent
         prompt: prompts/feature/implement.md
         linear_state: active
-        model: glm-5.1:cloud
+        model: kimi-k2.5:cloud
         max_turns: 30
         session: fresh
         transitions:

@@ -259,6 +259,51 @@ async def test_agent_state_still_complete_and_generic_report(tmp_path):
     assert mock_client.post_comment.await_count == 1
 
 
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        ("timed_out", "Turn exceeded 1s"),
+        ("stalled", "No output for 120s"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_timed_out_or_stalled_does_not_post_work_report(tmp_path, status: str, error: str):
+    """Incomplete runs (timeout / stall) retry — do not post partial work reports to Linear."""
+    orch = _orch(tmp_path, AG_ONLY_YAML)
+    issue = _issue()
+    orch._issue_workflow_cache[issue.id] = orch.cfg.get_workflow_for_issue(issue)
+    orch._issue_current_state[issue.id] = "work"
+
+    attempt = RunAttempt(
+        issue_id=issue.id,
+        issue_identifier=issue.identifier,
+        status=status,
+        state_name="work",
+        full_output='{"type":"assistant","message":{}}\npartial ndjson only',
+        error=error,
+    )
+
+    mock_client = MagicMock()
+    mock_client.post_comment = AsyncMock(return_value=True)
+
+    bg_tasks: list[asyncio.Task[None]] = []
+    real_create_task = asyncio.create_task
+
+    def capture_create_task(coro):  # type: ignore[no-untyped-def]
+        t = real_create_task(coro)
+        bg_tasks.append(t)
+        return t
+
+    with (
+        patch.object(orch, "_ensure_linear_client", return_value=mock_client),
+        patch("stokowski.orchestrator.asyncio.create_task", side_effect=capture_create_task),
+    ):
+        orch._on_worker_exit(issue, attempt)
+        await asyncio.gather(*bg_tasks)
+
+    mock_client.post_comment.assert_not_awaited()
+
+
 LEGACY_ROOT_AGENT_GATE_YAML = """
 tracker:
   project_slug: test-project

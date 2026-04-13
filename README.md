@@ -597,6 +597,16 @@ The startup panel states explicitly that this applies only to the **Claude** run
 
 ---
 
+## Work reports on Linear
+
+After a turn ends, Stokowski can post a **Work Report** comment on the issue. The body is taken from `<stokowski:report>...</stokowski:report>` in the agent output when present, or a short fallback if the tags are missing.
+
+**Turn timeout** (`turn_timeout_ms`) and **stall** (`stall_timeout_ms`) end the run with status `timed_out` or `stalled`. Those outcomes are treated as **incomplete**: Stokowski **does not** post a Work Report comment, because a **retry** is scheduled and partial stream text is usually not a useful Linear artifact. Use **verbose logging** or **`--log-agent-output`** to inspect what the agent emitted before the kill.
+
+Other outcomes (including a normal **`failed`** turn, e.g. missing report tags with exit code 0) may still post a Work Report as today.
+
+---
+
 ## Configuration reference
 
 <details>
