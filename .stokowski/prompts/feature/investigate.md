@@ -15,6 +15,19 @@ Follow the **`openspec-propose`** skill (**`/openspec-propose`**). Do not re-doc
 3. **Design a minimal viable approach** and carry it through **`/openspec-propose`** (change name, artifacts)
 4. **Document your findings** for human review using the structure below. The Linear issue only receives what you put **inside** `<stokowski:report>...</stokowski:report>` (see **How your work reaches Linear**). That block must include the **full text** of `proposal.md` and `design.md` from the change.
 
+## Local git (local only — no push / no PR)
+
+Do **not** do investigation or OpenSpec work only on the repo default branch (`main` / `master`). Create a dedicated branch so later stages (`implement`, `review-findings-route`) reuse the same line of history.
+
+**First run**
+
+1. Update the base branch: `git fetch` and `git checkout` the default branch (usually `main`), then `git pull` as appropriate.
+2. Create a work branch: `git checkout -b feature/<short-kebab-description>`. For bugfixes, use `fix/<short-kebab-description>`. You may include the issue identifier in the name (e.g. `feature/man-25-short-topic`). Use the same naming style as **`implement`**: `feature/description` or `fix/description`, kebab-case and descriptive.
+3. Perform **`/openspec-propose`** and any file edits for this stage **on this branch**. Local commits are expected when you add or change files under `openspec/changes/<name>/`.
+4. **Do not** `git push` or open a PR/MR from this stage. Push and PR happen only when **`review-findings-route`** prepares merge-review.
+
+**Rework run:** If a feature or fix branch already exists for this issue, stay on it; do not create a second branch.
+
 ## Codebase Exploration Strategy
 
 Start broad, then narrow:
@@ -143,15 +156,17 @@ If this is a rework run (the workspace already has investigation content):
 
 1. Read the review feedback from Linear comments.
 2. Read your prior investigation summary.
-3. Address the specific feedback — expand analysis, correct mistakes, or investigate additional areas as requested.
-4. Update the investigation inside your `<stokowski:report>` (especially **Technical Details**). If `proposal.md` or `design.md` changed, replace the inlined copies there with the **current full contents** of those files.
-5. Append a rework note to the Linear tracking comment.
+3. Stay on the existing work branch; do not create a second branch.
+4. Address the specific feedback — expand analysis, correct mistakes, or investigate additional areas as requested.
+5. Update the investigation inside your `<stokowski:report>` (especially **Technical Details**). If `proposal.md` or `design.md` changed, replace the inlined copies there with the **current full contents** of those files.
+6. Append a rework note to the Linear tracking comment.
 
 ## Do NOT
 
-- Write implementation code
-- Create branches or PRs
-- Modify source files (reading is fine)
+- Write **product/application implementation code** (e.g. under `stokowski/`). OpenSpec artifacts under `openspec/changes/` from **`/openspec-propose`** are required when applicable — that is not optional feature coding.
+- **Push** to the remote or **open a PR/MR** from this stage
+- Create a **second** branch if one already exists for this issue (rework)
+- Edit application or library source outside what this stage and OpenSpec require (reading the codebase is fine)
 - Skip the investigation to jump straight to coding
 - Paste stream-json, tool-result JSON, or line-number-prefixed readouts as substitutes for `proposal.md` / `design.md`
 

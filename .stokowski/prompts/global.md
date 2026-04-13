@@ -37,10 +37,13 @@ Use a single Linear comment as a persistent tracking comment:
 
 ## Rework awareness
 
-Every prompt in this workflow serves both first-run and rework cases.
-On rework runs, the workspace already contains prior work.  Check for:
+Every prompt in this workflow serves both **first-run** and **rework** cases.
 
-- An existing feature branch (do not create a new one)
+**First run:** If no work branch exists yet for this issue, create one per **`investigate`** / **`implement`** (e.g. `git checkout -b feature/...` or `fix/...`). Avoid leaving all commits on the default branch (`main`).
+
+On **rework** runs, the workspace already contains prior work. Check for:
+
+- An existing feature branch (do not create a second one — stay on it)
 - An open PR (push to it, do not open a second)
 - Review comments requesting changes (address them specifically)
 - Prior tracking comment content (append to it, do not overwrite)

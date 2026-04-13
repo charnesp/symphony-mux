@@ -9,6 +9,19 @@ Your task is to thoroughly research this feature request before any implementati
 3. **Design a minimal viable approach**
 4. **Document your findings** for human review
 
+## Local git (local only — no push / no PR)
+
+Do **not** do investigation work only on the repo default branch (`main` / `master`). Create a dedicated branch so later stages (`implement`, `review-findings-route`) reuse the same line of history.
+
+**First run**
+
+1. Update the base branch: `git fetch` and `git checkout` the default branch (usually `main`), then `git pull` as appropriate.
+2. Create a work branch: `git checkout -b feature/<short-kebab-description>`. For bugfixes, use `fix/<short-kebab-description>`. You may include the issue identifier in the name (e.g. `feature/man-25-short-topic`). Use the same naming style as **`implement`**: `feature/description` or `fix/description`, kebab-case and descriptive.
+3. Optional: make local commits on this branch as checkpoints; the investigation still must be posted to Linear as specified below.
+4. **Do not** `git push` or open a PR/MR from this stage. Push and PR happen only when **`review-findings-route`** prepares merge-review.
+
+**Rework run:** If a feature or fix branch already exists for this issue, stay on it; do not create a second branch.
+
 ## Codebase Exploration Strategy
 
 Start broad, then narrow:
@@ -88,14 +101,16 @@ If this is a rework run (the workspace already has investigation content):
 
 1. Read the review feedback from Linear comments.
 2. Read your prior investigation summary.
-3. Address the specific feedback — expand analysis, correct mistakes, or investigate additional areas as requested.
-4. Update the `## Investigation` comment with revised findings.
-5. Append a rework note to the Linear tracking comment.
+3. Stay on the existing work branch; do not create a second branch.
+4. Address the specific feedback — expand analysis, correct mistakes, or investigate additional areas as requested.
+5. Update the `## Investigation` comment with revised findings.
+6. Append a rework note to the Linear tracking comment.
 
 ## Do NOT
 
 - Write implementation code
-- Create branches or PRs
+- **Push** to the remote or **open a PR/MR** from this stage
+- Create a **second** branch if one already exists for this issue (rework)
 - Modify source files (reading is fine)
 - Skip the investigation to jump straight to coding
 
