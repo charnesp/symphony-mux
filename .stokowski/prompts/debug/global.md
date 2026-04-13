@@ -24,12 +24,16 @@ You are operating in the **DEBUG** workflow — a lightweight, fast-track proces
 
 ## Workflow Expectations
 
-This is a **lightweight workflow** with streamlined review gates:
+This is a **lightweight workflow** for bugs (no OpenSpec), with review gates:
 
-- Faster iteration cycles than feature work
-- Focus on correctness over completeness
-- Changes should be reviewable in 10 minutes or less
-- Automated tests are expected; manual QA is minimal
+- **Investigate** → human **fix-review** → **fix** (local bugfix branch) → automated **code-review** → **review-findings-route** (opens PR when ready) → human **merge-review** → **merge** (squash bugfix branch)
+- Faster than the full feature pipeline; still uses adversarial code review before merge
+- Automated tests and **`uv run pre-commit run --all-files`** are expected when the repo uses them
+- **No** `openspec/changes/` for debug work
+
+## Reports to Linear (`<stokowski:report>`)
+
+Stokowski **posts only** the content between `<stokowski:report>` and `</stokowski:report>`. Put summaries, investigation findings, and gate **Approval Required** items **inside** that block (see the lifecycle prompt). Do not paste tool transcripts, NDJSON/stream-json, or line-number-prefixed file dumps into the report — human-readable Markdown only.
 
 ## Investigation Summary Format
 
