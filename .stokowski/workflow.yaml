@@ -96,7 +96,9 @@ workflows:
 
   # ── Workflow: debug ───────────────────────────────────────────────────────
   # Triggered by the "debug" label on Linear issues.
-  # Lightweight workflow for bug investigation and quick fixes.
+  # Bug investigation → human approval → fix → automated code review →
+  # agent-gate routing → optional correct-findings loop → merge-review → merge.
+  # No OpenSpec; bugfix branch fix/<id>-... is merged at the end.
   # ──────────────────────────────────────────────────────────────────────────
   debug:
     label: debug
@@ -106,10 +108,12 @@ workflows:
       lifecycle_prompt: prompts/lifecycle.md
 
     # Per-workflow concurrency limits (optional, overrides global agent:)
-    max_concurrent_agents: 2
+    max_concurrent_agents: 4
     max_concurrent_agents_by_state:
       investigate: 2
       fix: 1
+      code-review: 1
+      correct-findings-code-review: 2
 
     states:
       # Entry state (first agent state)
@@ -139,15 +143,55 @@ workflows:
         max_turns: 15
         session: inherit
         transitions:
-          complete: pr-review
+          complete: code-review
 
-      pr-review:
+      code-review:
+        type: agent
+        prompt: prompts/feature/review.md
+        linear_state: active
+        runner: claude
+        model: kimi-k2.5:cloud
+        max_turns: 10
+        session: fresh
+        transitions:
+          complete: review-findings-route
+
+      review-findings-route:
+        type: agent-gate
+        prompt: prompts/debug/review-findings-route.md
+        linear_state: active
+        default_transition: needs_human
+        transitions:
+          has_findings: correct-findings-code-review
+          clean: merge-review
+          needs_human: merge-review
+
+      correct-findings-code-review:
+        type: agent
+        prompt: prompts/debug/correct-findings-code-review.md
+        linear_state: active
+        model: kimi-k2.5:cloud
+        max_turns: 15
+        session: inherit
+        transitions:
+          complete: code-review
+
+      merge-review:
         type: gate
         linear_state: review
         rework_to: fix
-        max_rework: 3
+        max_rework: 5
         transitions:
-          approve: done
+          approve: merge
+
+      merge:
+        type: agent
+        prompt: prompts/debug/merge.md
+        linear_state: active
+        max_turns: 5
+        session: inherit
+        transitions:
+          complete: done
 
       done:
         type: terminal
