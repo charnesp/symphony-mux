@@ -45,10 +45,7 @@ Run tests frequently: `uv run pytest tests/ -v`. You may use local `git commit` 
 Before marking complete, verify:
 
 - [ ] Implementation matches the approved design
-- [ ] All tests pass (`uv run pytest`)
-- [ ] No new lint errors (`uv run ruff check`)
-- [ ] Type checking passes (`uv run pyright`)
-- [ ] Security scan clean (`uv run bandit -r stokowski/`)
+- [ ] Pre-commit passes on the whole repo (`uv run pre-commit run --all-files`)
 - [ ] Local branch follows naming convention: `feature/description` or `fix/description` (for when the PR is opened later)
 - [ ] Commit messages are clear and descriptive (local commits only)
 
@@ -76,7 +73,7 @@ If this is a rework run after **implementation-review** requested changes:
 
 1. Read the review feedback in Linear (and in your `<stokowski:report>` / issue thread context).
 2. Address each point specifically on the existing local feature branch.
-3. Run the full quality suite again.
+3. Run `uv run pre-commit run --all-files` again.
 4. Add new local commits (do not force-push). Implementation rework stays local until **`review-findings-route`** opens the PR for merge-review.
 
 ## Do NOT
@@ -84,5 +81,5 @@ If this is a rework run after **implementation-review** requested changes:
 - Create a new branch if one already exists for this issue
 - Push to origin or open a PR/MR from this stage
 - Force-push (use normal commits)
-- Skip the quality suite (tests, lint, type-check)
+- Skip pre-commit (`uv run pre-commit run --all-files`)
 - Merge
