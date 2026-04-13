@@ -16,7 +16,6 @@
 # 4. Lancez: stokowski --dry-run
 # 5. Lancez: stokowski
 #
-# Ce workflow utilise Mux comme runner pour l'état "implement"
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -89,7 +88,7 @@ claude:
   permission_mode: auto
   model: kimi-k2.5:cloud
   max_turns: 5  # Limité pour les tests
-  turn_timeout_ms: 600000       # 10 minutes
+  turn_timeout_ms: 1200000       # 20 minutes
   stall_timeout_ms: 120000      # 2 minutes
 
 

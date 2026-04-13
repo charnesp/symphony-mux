@@ -1,13 +1,8 @@
 """Tests for resolved_project_slug() method and its consumers."""
 
-import os
-
-import pytest
-
 from stokowski.config import (
     ServiceConfig,
     TrackerConfig,
-    parse_workflow_file,
     validate_config,
 )
 
