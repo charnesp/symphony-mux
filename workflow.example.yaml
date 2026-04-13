@@ -81,8 +81,15 @@ hooks:
     git clone --depth 1 git@github.com:your-org/your-repo.git .
     npm install
   before_run: |
-    git fetch origin main
-    git rebase origin/main 2>/dev/null || git rebase --abort
+    git fetch origin main || exit 1
+    if [ -z "$(git status --porcelain)" ]; then
+      # Pure behind main → fast-forward; diverged → rebase onto main
+      if git merge-base --is-ancestor HEAD origin/main; then
+        git merge --ff-only origin/main || exit 1
+      else
+        git rebase origin/main || exit 1
+      fi
+    fi
   timeout_ms: 120000
 
 # -----------------------------------------------------------------------------
