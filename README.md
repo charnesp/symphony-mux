@@ -651,8 +651,15 @@ hooks:
   after_create: |                       # runs once when a new workspace is created
     git clone --depth 1 git@github.com:org/repo.git .
     npm install
-  before_run: |                         # runs before each agent turn
-    git pull origin main --rebase 2>/dev/null || true
+  before_run: |                         # runs before each agent turn (clean tree only)
+    git fetch origin main || exit 1
+    if [ -z "$(git status --porcelain)" ]; then
+      if git merge-base --is-ancestor HEAD origin/main; then
+        git merge --ff-only origin/main || exit 1
+      else
+        git rebase origin/main || exit 1
+      fi
+    fi
   after_run: |                          # runs after each agent turn (quality gate)
     npm test 2>&1 | tail -20
   before_remove: |                      # runs before workspace is deleted

@@ -64,7 +64,12 @@ hooks:
   before_run: |
     git fetch origin main || exit 1
     if [ -z "$(git status --porcelain)" ]; then
-      git merge --ff-only origin/main || exit 1
+      # Pure behind main → fast-forward; diverged (local commits + main moved) → rebase
+      if git merge-base --is-ancestor HEAD origin/main; then
+        git merge --ff-only origin/main || exit 1
+      else
+        git rebase origin/main || exit 1
+      fi
     fi
   timeout_ms: 60000
 
