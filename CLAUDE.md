@@ -27,6 +27,7 @@ The agent prompt, runtime config, and workspace setup all live in `workflow.yaml
 stokowski/
   agent_gate_route.py  Parse <<<STOKOWSKI_ROUTE>>> JSON + format routing-error comments
   config.py        workflow.yaml parser + typed config dataclasses
+  datetime_parse.py Shared UTC normalization for Linear ISO timestamps (used by linear + tracking)
   linear.py        Linear GraphQL client (httpx async)
   models.py        Domain models: Issue, RunAttempt, RetryEntry
   orchestrator.py  Main poll loop, dispatch, reconciliation, retry
@@ -141,10 +142,11 @@ Parses `workflow.yaml` (or legacy `.md` with front matter) into typed dataclasse
 3. `LINEAR_PROJECT_SLUG` env var as fallback
 
 ### linear.py
-Async GraphQL client over httpx. Three queries:
+Async GraphQL client over httpx. Core queries:
 - `fetch_candidate_issues()` — paginated, fetches all issues in active states with full detail (labels, blockers, branch name)
 - `fetch_issue_states_by_ids()` — lightweight reconciliation query, returns `{id: state_name}`
 - `fetch_issues_by_states()` — used on startup cleanup, returns minimal Issue objects
+- `fetch_comments()` — returns `CommentsFetchResult(nodes, complete)`. Paginates (`first` + `after`) until `hasNextPage` is false or a safety page cap is hit; dedupes by comment `id`; logs and returns `complete=False` if `hasNextPage` without `endCursor`, the cap is exceeded, or `nodes` is not a list. Raises `LinearCommentsFetchError` if the **first** GraphQL page fails (so callers do not treat that as an empty thread). After at least one successful page, errors return partial `nodes` with `complete=False`.
 
 Note: the reconciliation query uses `issues(filter: { id: { in: $ids } })` — not `nodes(ids:)` which doesn't exist in Linear's API.
 
@@ -240,9 +242,10 @@ Three-layer prompt assembly for state machine workflows. Main entry point is `as
 State machine tracking via structured Linear comments:
 - `make_state_comment(state, run)` — builds state entry comment with hidden JSON (`<!-- stokowski:state {...} -->`) + human-readable text
 - `make_gate_comment(state, status, prompt, rework_to, run)` — builds gate status comment (waiting/approved/rework/escalated)
-- `parse_latest_tracking(comments)` — scans comments (oldest-first) to find latest state or gate tracking entry for crash recovery
-- `get_last_tracking_timestamp(comments)` — finds the timestamp of the latest tracking comment
-- `get_comments_since(comments, since_timestamp)` — filters to non-tracking comments after a given timestamp (used to gather review feedback for rework runs)
+- `parse_latest_tracking(comments)` — picks the latest state or gate marker by **effective time** (UTC): `max(JSON timestamp, comment createdAt)` when both parse; otherwise whichever parses; **last** marker wins on ties; multiple markers in one comment are ordered by position in the body. JSON is extracted with **brace-balanced** parsing (not a naive regex) so `}` / `} -->` inside string values does not truncate the payload. Independent of API comment order.
+- `parse_latest_gate_waiting(comments)` — same time rules on gate markers with `status: waiting` (used for rework / gate recovery when `_pending_gates` is cold)
+- `get_last_tracking_timestamp(comments)` — ISO string for the same winning marker as `parse_latest_tracking` (payload `timestamp` if present, else `createdAt`)
+- `get_comments_since(comments, since_timestamp)` — filters to non-tracking comments after a given timestamp (used to gather review feedback for rework runs); parses boundaries with the same UTC-normalization rules as tracking; non-parseable non-empty `since_timestamp` yields **no** human comments (strict); tracking detection uses case-insensitive `<!-- stokowski:` check
 
 ---
 

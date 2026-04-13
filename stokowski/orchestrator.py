@@ -23,7 +23,7 @@ from .config import (
     parse_workflow_file,
     validate_config,
 )
-from .linear import LinearClient
+from .linear import LinearClient, LinearCommentsFetchError
 from .models import Issue, RetryEntry, RunAttempt
 from .prompt import assemble_prompt
 from .reporting import extract_report, format_no_report_comment, format_report_comment
@@ -123,6 +123,20 @@ class Orchestrator:
                 api_key=self.cfg.resolved_api_key(),
             )
         return self._linear
+
+    async def _load_issue_comments(self, client: LinearClient, issue: Issue) -> list[dict]:
+        """Fetch issue comments; warn when history may be truncated.
+
+        Raises:
+            LinearCommentsFetchError: The first page of comments could not be loaded.
+        """
+        result = await client.fetch_comments(issue.id)
+        if not result.complete:
+            logger.warning(
+                "Partial comment history for %s; tracking and workflow resolution may be stale",
+                issue.identifier,
+            )
+        return result.nodes
 
     async def start(self):
         """Start the orchestration loop."""
@@ -353,7 +367,7 @@ class Orchestrator:
 
         # Fetch comments from Linear and parse latest tracking
         client = self._ensure_linear_client()
-        comments = await client.fetch_comments(issue.id)
+        comments = await self._load_issue_comments(client, issue)
         tracking = parse_latest_tracking(comments)
 
         # Resolve workflow first (for workflow-scoped state lookup)
@@ -619,7 +633,7 @@ class Orchestrator:
 
         # Fetch comments and parse tracking to get workflow from tracking comment
         client = self._ensure_linear_client()
-        comments = await client.fetch_comments(issue.id)
+        comments = await self._load_issue_comments(client, issue)
         tracking = parse_latest_tracking(comments)
 
         # Resolve workflow for this issue (using tracking to get stored workflow)
@@ -735,7 +749,15 @@ class Orchestrator:
             if issue.id in self.running or issue.id in self.claimed:
                 continue
 
-            comments = await client.fetch_comments(issue.id)
+            try:
+                comments = await self._load_issue_comments(client, issue)
+            except LinearCommentsFetchError as e:
+                logger.warning(
+                    "Skipping %s this tick: could not load comments for gate approval: %s",
+                    issue.identifier,
+                    e,
+                )
+                continue
             gate_waiting = parse_latest_gate_waiting(comments)
             gate_state = self._pending_gates.pop(issue.id, None)
             if not gate_state and gate_waiting:
@@ -829,7 +851,15 @@ class Orchestrator:
             if issue.id in self.running or issue.id in self.claimed:
                 continue
 
-            comments = await client.fetch_comments(issue.id)
+            try:
+                comments = await self._load_issue_comments(client, issue)
+            except LinearCommentsFetchError as e:
+                logger.warning(
+                    "Skipping %s this tick: could not load comments for rework handling: %s",
+                    issue.identifier,
+                    e,
+                )
+                continue
             gate_waiting = parse_latest_gate_waiting(comments)
             gate_state = self._pending_gates.pop(issue.id, None)
             if not gate_state and gate_waiting:
@@ -1300,7 +1330,7 @@ class Orchestrator:
             comments: list[dict] | None = None
             try:
                 client = self._ensure_linear_client()
-                comments = await client.fetch_comments(issue.id)
+                comments = await self._load_issue_comments(client, issue)
             except Exception as e:
                 logger.warning(f"Failed to fetch comments for prompt: {e}")
 
@@ -1425,7 +1455,10 @@ class Orchestrator:
         workflow = self._workflow_for_run_attempt(issue, attempt)
         if workflow is None:
             client = self._ensure_linear_client()
-            comments = await client.fetch_comments(issue.id)
+            try:
+                comments = await self._load_issue_comments(client, issue)
+            except LinearCommentsFetchError:
+                comments = []
             tracking = parse_latest_tracking(comments)
             workflow = await self._resolve_workflow_for_issue(issue, tracking)
 

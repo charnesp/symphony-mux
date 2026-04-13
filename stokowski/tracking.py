@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import logging
-import re
 from datetime import UTC, datetime
 from typing import Any
 
-logger = logging.getLogger("stokowski.tracking")
+from .datetime_parse import parse_linear_iso_datetime
 
-STATE_PATTERN = re.compile(r"<!-- stokowski:state ({.*?}) -->")
-GATE_PATTERN = re.compile(r"<!-- stokowski:gate ({.*?}) -->")
+logger = logging.getLogger("stokowski.tracking")
 
 
 def make_state_comment(state: str, run: int = 1, workflow: str | None = None) -> str:
@@ -74,112 +71,253 @@ def make_gate_comment(
 
 
 def parse_latest_tracking(comments: list[dict]) -> dict[str, Any] | None:
-    """Parse comments (oldest-first) to find the latest state or gate tracking entry.
+    """Return the most recent state or gate tracking entry.
 
-    Returns a dict with keys:
-        - "type": "state" or "gate"
-        - Plus all fields from the JSON payload
+    Picks the candidate with the latest **effective time** per marker: when both
+    parse, ``max(JSON timestamp, Linear createdAt)`` (so the instant is not
+    earlier than the comment existed); otherwise whichever field parses. Order
+    of comments in the API response does not matter. Values are normalized to
+    UTC; naive strings are treated as UTC. Ties use the **last** marker in scan
+    order among those tied for max time. Multiple ``stokowski:`` markers in one
+    comment are ordered by position in the body.
 
-    Returns None if no tracking comments found.
+    If no candidate has a parseable time, falls back to the last marker in
+    scan order (document order within each comment, then comment list order).
+
+    Returns a dict with ``type`` ``"state"`` or ``"gate"`` plus JSON fields,
+    or None if no tracking markers found.
     """
-    latest: dict[str, Any] | None = None
+    entries = _collect_tracking_entries(comments)
+    if not entries:
+        return None
+    row, _src = _resolve_best_tracking_row(entries)
+    return row
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 string to an aware UTC datetime (shared with ``linear``)."""
+    return parse_linear_iso_datetime(value)
+
+
+def _payload_timestamp_string(payload: dict[str, Any]) -> str | None:
+    v = payload.get("timestamp")
+    if isinstance(v, str) and v.strip():
+        return v
+    return None
+
+
+def _extract_balanced_json_object(body: str, open_brace: int) -> tuple[int, str] | None:
+    """``open_brace`` indexes ``{``. Returns ``(index_after_closing_brace, json_slice)``."""
+    if open_brace >= len(body) or body[open_brace] != "{":
+        return None
+    depth = 0
+    i = open_brace
+    in_str = False
+    esc = False
+    while i < len(body):
+        c = body[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            i += 1
+            continue
+        if c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return i + 1, body[open_brace : i + 1]
+        i += 1
+    return None
+
+
+def _skip_stokowski_html_close(body: str, after_json: int) -> int | None:
+    """Return index after ``-->`` following JSON, or None."""
+    k = after_json
+    while k < len(body) and body[k] in " \t\n\r":
+        k += 1
+    if body[k : k + 3] != "-->":
+        return None
+    return k + 3
+
+
+def _iter_stokowski_marker_json(body: str, marker: str) -> list[tuple[int, str]]:
+    """``marker`` is ``state`` or ``gate``. Each hit: ``(start_offset, json_str)``."""
+    prefix = f"<!-- stokowski:{marker} "
+    out: list[tuple[int, str]] = []
+    pos = 0
+    plen = len(prefix)
+    while pos <= len(body) - plen:
+        i = body.find(prefix, pos)
+        if i == -1:
+            break
+        j = i + plen
+        while j < len(body) and body[j] in " \t\n\r":
+            j += 1
+        if j >= len(body) or body[j] != "{":
+            pos = i + 1
+            continue
+        bal = _extract_balanced_json_object(body, j)
+        if bal is None:
+            logger.warning("Unbalanced JSON in stokowski:%s marker at offset %s", marker, i)
+            pos = i + 1
+            continue
+        end_json, json_str = bal
+        end_comment = _skip_stokowski_html_close(body, end_json)
+        if end_comment is None:
+            pos = i + 1
+            continue
+        out.append((i, json_str))
+        pos = end_comment
+    return out
+
+
+def _tracking_payload_effective_time(
+    comment: dict[str, Any], payload: dict[str, Any]
+) -> datetime | None:
+    """UTC instant for ordering: max(parsed JSON timestamp, comment createdAt) when both exist.
+
+    Ensures the effective time is not earlier than the Linear comment creation
+    time. If only one field parses, that value is used.
+    """
+    ts = _parse_iso_datetime(_payload_timestamp_string(payload))
+    ca = _parse_iso_datetime(comment.get("createdAt"))
+    if ts is not None and ca is not None:
+        return max(ts, ca)
+    return ts or ca
+
+
+def _resolve_best_tracking_row(
+    entries: list[tuple[datetime | None, dict[str, Any], dict[str, Any]]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return ``(row, source_comment)`` for the latest effective time, or last entry if none parse."""
+    best: tuple[datetime, dict[str, Any], dict[str, Any]] | None = None
+    for eff, row, comment in entries:
+        if eff is None:
+            continue
+        if best is None or eff >= best[0]:
+            best = (eff, row, comment)
+    if best is not None:
+        return best[1], best[2]
+    return entries[-1][1], entries[-1][2]
+
+
+def _collect_tracking_entries(
+    comments: list[dict],
+) -> list[tuple[datetime | None, dict[str, Any], dict[str, Any]]]:
+    """Each ``stokowski:state`` / ``stokowski:gate`` marker → (effective_time, row, comment).
+
+    Markers in the same comment are ordered by start offset in the body (all
+    state and gate matches merged and sorted).
+    """
+    entries: list[tuple[datetime | None, dict[str, Any], dict[str, Any]]] = []
 
     for comment in comments:
         body = comment.get("body", "")
+        markers: list[tuple[int, str, str]] = []
+        for pos, json_raw in _iter_stokowski_marker_json(body, "state"):
+            markers.append((pos, "state", json_raw))
+        for pos, json_raw in _iter_stokowski_marker_json(body, "gate"):
+            markers.append((pos, "gate", json_raw))
+        markers.sort(key=lambda t: t[0])
 
-        state_match = STATE_PATTERN.search(body)
-        if state_match:
+        for _pos, kind, json_raw in markers:
             try:
-                data = json.loads(state_match.group(1))
-                data["type"] = "state"
-                latest = data
-            except json.JSONDecodeError:
-                pass
+                raw = json.loads(json_raw)
+            except json.JSONDecodeError as e:
+                logger.warning("Invalid JSON in stokowski:%s marker: %s", kind, e)
+                continue
+            row = dict(raw)
+            row["type"] = kind
+            eff = _tracking_payload_effective_time(comment, raw)
+            entries.append((eff, row, comment))
 
-        gate_match = GATE_PATTERN.search(body)
-        if gate_match:
-            try:
-                data = json.loads(gate_match.group(1))
-                data["type"] = "gate"
-                latest = data
-            except json.JSONDecodeError:
-                pass
-
-    return latest
+    return entries
 
 
 def parse_latest_gate_waiting(comments: list[dict]) -> dict[str, Any] | None:
     """Return the most recent gate tracking payload with status "waiting".
 
-    Comments are expected oldest-first (Linear order). Later comments win so
-    the result is the chronologically last *waiting* gate, not the last gate
-    comment of any status (e.g. approved after waiting).
+    Uses the same effective-time rules as :func:`parse_latest_tracking` on the
+    subset of gate markers with ``status == "waiting"``. Ties: last wins.
+
+    If no candidate has a parseable time, falls back to the last waiting gate
+    in document/list scan order.
     """
-    latest_waiting: dict[str, Any] | None = None
-
-    for comment in comments:
-        body = comment.get("body", "")
-        gate_match = GATE_PATTERN.search(body)
-        if not gate_match:
-            continue
-        try:
-            data = json.loads(gate_match.group(1))
-        except json.JSONDecodeError:
-            continue
-        if data.get("status") != "waiting":
-            continue
-        latest_waiting = dict(data)
-        latest_waiting["type"] = "gate"
-
-    return latest_waiting
+    entries = _collect_tracking_entries(comments)
+    waiting = [
+        (eff, row, c)
+        for eff, row, c in entries
+        if row.get("type") == "gate" and row.get("status") == "waiting"
+    ]
+    if not waiting:
+        return None
+    row, _src = _resolve_best_tracking_row(waiting)
+    return row
 
 
 def get_last_tracking_timestamp(comments: list[dict]) -> str | None:
-    """Find the timestamp of the latest tracking comment."""
-    latest_ts: str | None = None
+    """ISO timestamp string for the same tracking entry as :func:`parse_latest_tracking`.
 
-    for comment in comments:
-        body = comment.get("body", "")
-        for pattern in (STATE_PATTERN, GATE_PATTERN):
-            match = pattern.search(body)
-            if match:
-                try:
-                    data = json.loads(match.group(1))
-                    ts = data.get("timestamp")
-                    if ts:
-                        latest_ts = ts
-                except json.JSONDecodeError:
-                    pass
+    Prefers the payload's ``timestamp`` field; if missing, returns the
+    comment's ``createdAt`` string for that entry.
+    """
+    entries = _collect_tracking_entries(comments)
+    if not entries:
+        return None
 
-    return latest_ts
+    row, comment = _resolve_best_tracking_row(entries)
+
+    ts = _payload_timestamp_string(row)
+    if ts:
+        return ts
+    created = comment.get("createdAt")
+    if isinstance(created, str) and created.strip():
+        return created
+    return None
+
+
+def _comment_body_is_stokowski_tracking(body: str) -> bool:
+    return "<!-- stokowski:" in body.casefold()
 
 
 def get_comments_since(comments: list[dict], since_timestamp: str | None) -> list[dict]:
     """Filter comments to only those after a given timestamp.
 
     Returns comments that are NOT stokowski tracking comments and
-    were created after the given timestamp.
+    were created after the given timestamp. If ``since_timestamp`` is
+    non-empty but not parseable, returns an empty list (strict boundary).
+    When a since bound is set, human comments without a parseable
+    ``createdAt`` are excluded (unknown time vs boundary).
     """
     result = []
-    since_dt = None
     if since_timestamp:
-        with contextlib.suppress(ValueError, AttributeError):
-            since_dt = datetime.fromisoformat(since_timestamp.replace("Z", "+00:00"))
+        since_dt = _parse_iso_datetime(since_timestamp)
+        if since_dt is None:
+            return []
+    else:
+        since_dt = None
 
     for comment in comments:
         body = comment.get("body", "")
-        if "<!-- stokowski:" in body:
+        if _comment_body_is_stokowski_tracking(body):
             continue
 
         if since_dt:
             created = comment.get("createdAt", "")
-            if created:
-                try:
-                    created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                    if created_dt <= since_dt:
-                        continue
-                except (ValueError, AttributeError):
-                    pass
+            created_dt = _parse_iso_datetime(created) if created else None
+            if created_dt is None:
+                continue
+            if created_dt <= since_dt:
+                continue
 
         result.append(comment)
 

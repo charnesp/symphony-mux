@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from stokowski.config import parse_workflow_file
+from stokowski.linear import CommentsFetchResult
 from stokowski.models import Issue, RunAttempt
 from stokowski.orchestrator import Orchestrator
 from stokowski.tracking import make_gate_comment, make_state_comment
@@ -103,6 +104,29 @@ def _issue() -> Issue:
         state="In Progress",
         labels=[],
     )
+
+
+@pytest.mark.asyncio
+async def test_render_prompt_async_catches_non_comment_fetch_errors_and_omits_comments(
+    tmp_path,
+):
+    """Regression: broad except so bugs in client setup do not kill the worker."""
+    orch = _orch(tmp_path, AG_GATE_YAML)
+    issue = _issue()
+    captured: dict[str, object] = {}
+
+    def capture_assemble(*_a, **kw):
+        captured["comments"] = kw.get("comments")
+        return "ok-prompt"
+
+    with (
+        patch.object(orch, "_load_issue_comments", side_effect=RuntimeError("boom")),
+        patch("stokowski.orchestrator.assemble_prompt", side_effect=capture_assemble),
+    ):
+        out = await orch._render_prompt_async(issue, 1, "start", orch.cfg.workflows["default"])
+
+    assert out == "ok-prompt"
+    assert captured.get("comments") is None
 
 
 @pytest.mark.asyncio
@@ -210,7 +234,7 @@ async def test_agent_state_still_complete_and_generic_report(tmp_path):
 
     mock_client = MagicMock()
     mock_client.post_comment = AsyncMock(return_value=True)
-    mock_client.fetch_comments = AsyncMock(return_value=[])
+    mock_client.fetch_comments = AsyncMock(return_value=CommentsFetchResult([], True))
     mock_safe = AsyncMock()
 
     bg_tasks: list[asyncio.Task[None]] = []
@@ -609,7 +633,7 @@ async def test_handle_gate_responses_missing_gate_state_logs_and_orphans(tmp_pat
     )
     mock_client = MagicMock()
     mock_client.fetch_issues_by_states = AsyncMock(side_effect=[[issue], []])
-    mock_client.fetch_comments = AsyncMock(return_value=[])
+    mock_client.fetch_comments = AsyncMock(return_value=CommentsFetchResult([], True))
     mock_handle = AsyncMock()
 
     with (
@@ -641,7 +665,7 @@ async def test_handle_gate_responses_uses_last_waiting_gate_not_latest_tracking(
     ]
     mock_client = MagicMock()
     mock_client.fetch_issues_by_states = AsyncMock(side_effect=[[issue], []])
-    mock_client.fetch_comments = AsyncMock(return_value=comments)
+    mock_client.fetch_comments = AsyncMock(return_value=CommentsFetchResult(comments, True))
     mock_client.post_comment = AsyncMock(return_value=True)
     mock_client.update_issue_state = AsyncMock(return_value=True)
 
@@ -666,7 +690,7 @@ async def test_handle_gate_approval_invalid_target_orphans_no_approved_tracking(
     comments = [{"body": make_gate_comment("human", "waiting", workflow="default")}]
     mock_client = MagicMock()
     mock_client.fetch_issues_by_states = AsyncMock(side_effect=[[issue], []])
-    mock_client.fetch_comments = AsyncMock(return_value=comments)
+    mock_client.fetch_comments = AsyncMock(return_value=CommentsFetchResult(comments, True))
     mock_client.post_comment = AsyncMock(return_value=True)
     mock_handle = AsyncMock()
 
@@ -706,7 +730,7 @@ async def test_handle_rework_max_exceeded_orphans(tmp_path):
     comments = [{"body": make_gate_comment("human", "waiting", workflow="default")}]
     mock_client = MagicMock()
     mock_client.fetch_issues_by_states = AsyncMock(side_effect=[[], [issue]])
-    mock_client.fetch_comments = AsyncMock(return_value=comments)
+    mock_client.fetch_comments = AsyncMock(return_value=CommentsFetchResult(comments, True))
     mock_client.post_comment = AsyncMock(return_value=True)
     mock_handle = AsyncMock()
 
@@ -736,7 +760,7 @@ async def test_handle_rework_missing_rework_to_orphans(tmp_path):
     comments = [{"body": make_gate_comment("human", "waiting", workflow="default")}]
     mock_client = MagicMock()
     mock_client.fetch_issues_by_states = AsyncMock(side_effect=[[], [issue]])
-    mock_client.fetch_comments = AsyncMock(return_value=comments)
+    mock_client.fetch_comments = AsyncMock(return_value=CommentsFetchResult(comments, True))
     mock_handle = AsyncMock()
 
     with (
@@ -763,7 +787,7 @@ async def test_handle_rework_invalid_rework_to_orphans(tmp_path):
     comments = [{"body": make_gate_comment("human", "waiting", workflow="default")}]
     mock_client = MagicMock()
     mock_client.fetch_issues_by_states = AsyncMock(side_effect=[[], [issue]])
-    mock_client.fetch_comments = AsyncMock(return_value=comments)
+    mock_client.fetch_comments = AsyncMock(return_value=CommentsFetchResult(comments, True))
     mock_handle = AsyncMock()
 
     with (
