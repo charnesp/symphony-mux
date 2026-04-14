@@ -1326,9 +1326,18 @@ class Orchestrator:
 
             # Fetch comments for lifecycle context
             comments: list[dict] | None = None
+            is_rework = False
             try:
                 client = self._ensure_tracker_client()
                 comments = await self._load_issue_comments(client, issue)
+                tracking = parse_latest_tracking(comments)
+                if tracking and tracking.get("type") == "gate" and tracking.get("status") == "rework":
+                    rework_to = tracking.get("rework_to")
+                    if not rework_to:
+                        gate_state = tracking.get("state")
+                        gate_cfg = workflow_states.get(gate_state) if gate_state else None
+                        rework_to = gate_cfg.rework_to if gate_cfg else None
+                    is_rework = bool(rework_to and rework_to == state_name)
             except Exception as e:
                 logger.warning(f"Failed to fetch comments for prompt: {e}")
 
@@ -1341,7 +1350,7 @@ class Orchestrator:
                 workflow_states=workflow_states,
                 workflow_prompts=workflow_prompts,
                 run=run,
-                is_rework=False,
+                is_rework=is_rework,
                 attempt=attempt_num or 1,
                 last_run_at=last_run_at,
                 comments=comments,

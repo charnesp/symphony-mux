@@ -13,6 +13,7 @@ from stokowski.prompt import (
     load_prompt_file,
     render_template,
 )
+from stokowski.tracking import make_state_comment
 
 
 class TestBuildLifecycleSection:
@@ -393,3 +394,61 @@ class TestAssemblePrompt:
                 state_cfg=state_cfg,
                 workflow_states={},
             )
+
+    def test_filters_recent_comments_from_last_gate_waiting_timestamp(self, tmp_path):
+        """Human comments after last waiting gate are included, even across later tracking entries."""
+        workflow_dir = tmp_path / "workflow"
+        workflow_dir.mkdir()
+        prompts_dir = workflow_dir / "prompts"
+        prompts_dir.mkdir()
+        (prompts_dir / "lifecycle.md").write_text(
+            "{% for comment in recent_comments %}[{{ comment.body }}]{% endfor %}"
+        )
+
+        cfg = ServiceConfig(prompts=PromptsConfig(lifecycle_prompt="prompts/lifecycle.md"))
+        issue = Issue(
+            id="test-123",
+            identifier="PROJ-1",
+            title="Test issue",
+            state="In Progress",
+        )
+        state_cfg = StateConfig(name="implement", type="agent")
+
+        comments = [
+            {
+                "id": "g-waiting",
+                "createdAt": "2026-01-01T00:00:00.000Z",
+                "body": (
+                    '<!-- stokowski:gate {"state":"review","status":"waiting","run":1,'
+                    '"timestamp":"2026-01-01T00:00:00+00:00","workflow":"feature"} -->'
+                ),
+            },
+            {
+                "id": "h1",
+                "createdAt": "2026-01-01T00:01:00.000Z",
+                "body": "human feedback 1",
+            },
+            {
+                "id": "s1",
+                "createdAt": "2026-01-01T00:02:00.000Z",
+                "body": make_state_comment("implement", run=2, workflow="feature"),
+            },
+            {
+                "id": "h2",
+                "createdAt": "2026-01-01T00:03:00.000Z",
+                "body": "human feedback 2",
+            },
+        ]
+
+        result = assemble_prompt(
+            cfg=cfg,
+            workflow_dir=str(workflow_dir),
+            issue=issue,
+            state_name="implement",
+            state_cfg=state_cfg,
+            workflow_states={},
+            comments=comments,
+        )
+
+        assert "[human feedback 1]" in result
+        assert "[human feedback 2]" in result

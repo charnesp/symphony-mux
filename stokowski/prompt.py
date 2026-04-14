@@ -16,7 +16,11 @@ from jinja2 import BaseLoader, Environment, Undefined, select_autoescape
 
 from .config import LinearStatesConfig, PromptsConfig, ServiceConfig, StateConfig
 from .models import Issue
-from .tracking import get_comments_since, get_last_tracking_timestamp
+from .tracking import (
+    get_comments_since,
+    get_last_gate_waiting_timestamp,
+    get_last_tracking_timestamp,
+)
 
 log = logging.getLogger(__name__)
 
@@ -300,7 +304,9 @@ def assemble_prompt(
     # Filter comments to recent non-tracking ones
     recent: list[dict[str, Any]] = []
     if comments:
-        last_ts = get_last_tracking_timestamp(comments)
+        # Prefer comments since the latest waiting gate so rework runs include
+        # reviewer feedback left during gate review.
+        last_ts = get_last_gate_waiting_timestamp(comments) or get_last_tracking_timestamp(comments)
         recent = get_comments_since(comments, last_ts)
 
     # Load lifecycle template (required)

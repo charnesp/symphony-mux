@@ -333,6 +333,32 @@ def parse_latest_gate_waiting(comments: list[dict]) -> dict[str, Any] | None:
     return row
 
 
+def get_last_gate_waiting_timestamp(comments: list[dict]) -> str | None:
+    """ISO timestamp string for the most recent waiting gate marker.
+
+    Uses the same effective-time rules and tie-breaking as
+    :func:`parse_latest_gate_waiting`. Prefers payload ``timestamp``; falls back
+    to the source comment ``createdAt``.
+    """
+    entries = _collect_tracking_entries(comments)
+    waiting = [
+        (eff, row, c)
+        for eff, row, c in entries
+        if row.get("type") == "gate" and row.get("status") == "waiting"
+    ]
+    if not waiting:
+        return None
+
+    row, comment = _resolve_best_tracking_row(waiting)
+    ts = _payload_timestamp_string(row)
+    if ts:
+        return ts
+    created = comment.get("createdAt")
+    if isinstance(created, str) and created.strip():
+        return created
+    return None
+
+
 def get_last_tracking_timestamp(comments: list[dict]) -> str | None:
     """ISO timestamp string for the same tracking entry as :func:`parse_latest_tracking`.
 

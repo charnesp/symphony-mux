@@ -130,6 +130,45 @@ async def test_render_prompt_async_catches_non_comment_fetch_errors_and_omits_co
 
 
 @pytest.mark.asyncio
+async def test_render_prompt_async_marks_rework_when_latest_gate_rework_targets_state(tmp_path):
+    """Rework context should be propagated to lifecycle rendering."""
+    orch = _orch(tmp_path, AG_GATE_YAML)
+    issue = _issue()
+    captured: dict[str, object] = {}
+    workflow = orch.cfg.workflows["default"]
+
+    rework_body = make_gate_comment(
+        state="human",
+        status="rework",
+        rework_to="start",
+        run=2,
+        workflow="default",
+    )
+    comments = [
+        {
+            "id": "c1",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "body": rework_body,
+        }
+    ]
+
+    def capture_assemble(*_a, **kw):
+        captured["is_rework"] = kw.get("is_rework")
+        captured["comments"] = kw.get("comments")
+        return "ok-prompt"
+
+    with (
+        patch.object(orch, "_load_issue_comments", AsyncMock(return_value=comments)),
+        patch("stokowski.orchestrator.assemble_prompt", side_effect=capture_assemble),
+    ):
+        out = await orch._render_prompt_async(issue, 1, "start", workflow)
+
+    assert out == "ok-prompt"
+    assert captured.get("is_rework") is True
+    assert captured.get("comments") == comments
+
+
+@pytest.mark.asyncio
 async def test_agent_gate_success_transitions_chosen_key_and_posts_report(tmp_path):
     orch = _orch(tmp_path, AG_GATE_YAML)
     issue = _issue()

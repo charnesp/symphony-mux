@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from stokowski.tracking import (
+    get_last_gate_waiting_timestamp,
     make_gate_comment,
     make_state_comment,
     parse_latest_gate_waiting,
@@ -115,3 +116,20 @@ def test_parse_latest_gate_waiting_tie_last_waiting_wins():
     got = parse_latest_gate_waiting(comments)
     assert got is not None
     assert got["state"] == "g-second"
+
+
+def test_get_last_gate_waiting_timestamp_returns_payload_timestamp_when_present():
+    comments = [
+        {
+            "body": make_gate_comment("g1", "waiting", workflow="wf"),
+            "createdAt": "2026-01-01T00:00:00.000Z",
+        }
+    ]
+    ts = get_last_gate_waiting_timestamp(comments)
+    assert ts is not None
+    assert ts.endswith("+00:00")
+
+
+def test_get_last_gate_waiting_timestamp_returns_none_when_no_waiting():
+    comments = [{"body": make_gate_comment("g1", "approved", workflow="wf")}]
+    assert get_last_gate_waiting_timestamp(comments) is None
