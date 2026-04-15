@@ -376,3 +376,53 @@ async def test_download_comment_images_missing_url(tmp_path: Path):
 
     assert len(result) == 1
     assert result[0]["downloaded_images"] == []
+
+
+@pytest.mark.asyncio
+async def test_download_comment_images_from_markdown_body(tmp_path: Path):
+    """Extract image URLs from markdown body when attachments are unavailable."""
+    client = LinearClient("https://api.linear.app/graphql", "test-key")
+    issue = Issue(
+        id="issue-123",
+        identifier="MAN-27",
+        title="Test Issue",
+    )
+
+    comments = [
+        {
+            "id": "c1",
+            "body": "Screenshot:\\n![screen](https://files.linear.app/screen.png)",
+            "createdAt": "2026-01-01T00:00:00Z",
+        }
+    ]
+
+    png_data = b"\x89PNG\r\n\x1a\n" + b"fake png data"
+    mock_response = AsyncMock()
+    mock_response.content = png_data
+    mock_response.raise_for_status = AsyncMock()
+
+    with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_response
+        result = await client.download_comment_images(comments, issue, tmp_path)
+
+    assert len(result) == 1
+    assert len(result[0]["downloaded_images"]) == 1
+    img_info = result[0]["downloaded_images"][0]
+    assert img_info["url"] == "https://files.linear.app/screen.png"
+    assert img_info["title"] == "screen"
+    assert Path(img_info["path"]).exists()
+
+
+def test_extract_markdown_image_attachments():
+    """Markdown image syntax should be converted into image attachment-like entries."""
+    body = (
+        "See image ![A](https://files.linear.app/a.png) and "
+        "![B](https://files.linear.app/b.webp) plus duplicate "
+        "![A2](https://files.linear.app/a.png)"
+    )
+    out = LinearClient._extract_markdown_image_attachments(body)
+    assert [x["url"] for x in out] == [
+        "https://files.linear.app/a.png",
+        "https://files.linear.app/b.webp",
+    ]
+    assert all(x["sourceType"] == "image" for x in out)

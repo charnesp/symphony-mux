@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -140,14 +141,6 @@ query($issueId: String!, $after: String) {
         id
         body
         createdAt
-        attachments {
-          nodes {
-            id
-            url
-            title
-            sourceType
-          }
-        }
       }
     }
   }
@@ -493,6 +486,7 @@ class LinearClient(TrackerClient):
         ".heic": "image/heic",
         ".heif": "image/heic",
     }
+    _MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[(?P<title>[^\]]*)\]\((?P<url>https?://[^)\s]+)\)")
 
     @staticmethod
     def _get_mime_type(path: Path) -> str | None:
@@ -540,6 +534,34 @@ class LinearClient(TrackerClient):
             return "image/heic"
 
         return None
+
+    @staticmethod
+    def _extract_markdown_image_attachments(body: str | None) -> list[dict[str, str]]:
+        """Extract markdown image URLs from comment body.
+
+        Returns attachment-like dicts to keep the downstream image download
+        pipeline unchanged when the GraphQL ``Comment`` type does not expose
+        ``attachments``.
+        """
+        if not body:
+            return []
+
+        out: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        for match in LinearClient._MARKDOWN_IMAGE_PATTERN.finditer(body):
+            url = (match.group("url") or "").strip()
+            if not url or url in seen_urls:
+                continue
+            seen_urls.add(url)
+            title = (match.group("title") or "").strip() or Path(url).name or "image"
+            out.append(
+                {
+                    "url": url,
+                    "title": title,
+                    "sourceType": "image",
+                }
+            )
+        return out
 
     async def _download_image(self, url: str, dest_path: Path) -> bool:
         """Download image from Linear and save to dest_path.
@@ -594,11 +616,15 @@ class LinearClient(TrackerClient):
         max_total_images: int = 20,
         max_image_size_mb: int = 10,
     ) -> list[dict]:
-        """Download images from comment attachments.
+        """Download images from comment attachments or markdown image links.
 
-        Filters for sourceType == "image" only. Downloads images to workspace/images/
-        with filenames like {issue_identifier}-{comment_id}-{sanitized_filename}.
-        Skips existing files (cache behavior).
+        Prefers ``comment.attachments.nodes`` when available. For API schemas
+        where ``Comment`` has no ``attachments`` field, falls back to extracting
+        markdown image links from ``comment.body``.
+
+        Downloads images to workspace/images/ with filenames like
+        {issue_identifier}-{comment_id}-{sanitized_filename}. Skips existing
+        files (cache behavior).
 
         Args:
             comments: List of comment nodes from fetch_comments
@@ -620,6 +646,8 @@ class LinearClient(TrackerClient):
 
         for comment in comments:
             attachments = comment.get("attachments", {}).get("nodes", [])
+            if not attachments:
+                attachments = self._extract_markdown_image_attachments(comment.get("body"))
             downloaded = []
 
             for attachment in attachments[:max_images_per_comment]:

@@ -182,7 +182,8 @@ async def test_fetch_comments_page_cap_returns_incomplete():
 
 
 def test_comments_query_does_not_use_order_by_on_issue_comments():
-    """Regression guard: issue.comments rejects orderBy and returns HTTP 400."""
+    """Regression guard: issue.comments rejects some args/fields with HTTP 400."""
     assert "issue(id: $issueId)" in COMMENTS_QUERY
     assert "comments(first: 50, after: $after)" in COMMENTS_QUERY
     assert "orderBy" not in COMMENTS_QUERY
+    assert "attachments" not in COMMENTS_QUERY
