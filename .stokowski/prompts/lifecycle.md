@@ -143,4 +143,13 @@ Treat every review comment above as required acceptance criteria, then address a
 {% endfor %}
 
 {% endif %}
+
+{% if state_name == "investigate" %}
+## 🚫 Stage Contract: `investigate` (Hard Rules)
+
+This stage is **analysis-only**. You are explicitly forbidden from implementing fixes or coding here.
+
+If you violate these rules, your response is invalid for this stage and must be redone as investigation-only.
+{% endif %}
+
 <!-- END STOKOWSKI LIFECYCLE -->

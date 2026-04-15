@@ -131,7 +131,7 @@ mutation($issueId: String!, $body: String!) {
 COMMENTS_QUERY = """
 query($issueId: String!, $after: String) {
   issue(id: $issueId) {
-    comments(first: 50, after: $after, orderBy: createdAt) {
+    comments(first: 50, after: $after) {
       pageInfo {
         hasNextPage
         endCursor

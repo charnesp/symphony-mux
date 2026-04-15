@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from stokowski.linear import LinearClient, LinearCommentsFetchError
+from stokowski.linear import COMMENTS_QUERY, LinearClient, LinearCommentsFetchError
 
 
 @pytest.mark.asyncio
@@ -179,3 +179,10 @@ async def test_fetch_comments_page_cap_returns_incomplete():
         result = await client.fetch_comments("issue-cap")
     assert result.complete is False
     assert mock_gql.await_count == 2
+
+
+def test_comments_query_does_not_use_order_by_on_issue_comments():
+    """Regression guard: issue.comments rejects orderBy and returns HTTP 400."""
+    assert "issue(id: $issueId)" in COMMENTS_QUERY
+    assert "comments(first: 50, after: $after)" in COMMENTS_QUERY
+    assert "orderBy" not in COMMENTS_QUERY
