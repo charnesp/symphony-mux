@@ -346,6 +346,8 @@ The project includes pre-commit hooks for code quality:
 
 To run hooks manually: `uv run pre-commit run --all-files`
 
+Pre-commit and commit-message gate policy is defined in `AGENTS.md` under `Validation Before Committing` (single source of truth).
+
 ---
 
 ## Git Workflow

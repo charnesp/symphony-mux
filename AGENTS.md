@@ -399,8 +399,11 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 ## Validation Before Committing
 
 - Test against a real Linear project with a test ticket
-- Run `stokowski --dry-run` to validate workflow.yaml
+- Run `uv run stokowski .stokowski/workflow.yaml --dry-run` to validate the operator workflow config used in this repo
 - Verify no breaking changes to state machine protocol
+- Run `uv run pre-commit run --all-files` and ensure **all** hooks pass
+- Validate `commit-msg` explicitly using the real subject you plan to commit (including release commits), e.g. `printf "<planned-subject>\n\n<optional-body>\n" > /tmp/commit-msg.txt && uv run pre-commit run --hook-stage commit-msg commitizen --commit-msg-filename /tmp/commit-msg.txt`
+- **ABSOLUTE RULE:** do not commit, push, or open/update a PR while any pre-commit or commit-msg hook is failing
 
 ## Pull Request Requirements
 
