@@ -1115,6 +1115,10 @@ class Orchestrator:
             asyncio.create_task(self._safe_enter_gate(issue, state_name, workflow_name))
             return
 
+        # Get run number from cache if not provided (fresh dispatch vs retry)
+        if attempt_num is None or attempt_num == 0:
+            attempt_num = self._issue_state_runs.get(issue.id, 1)
+
         attempt = RunAttempt(
             issue_id=issue.id,
             issue_identifier=issue.identifier,
