@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -486,7 +487,10 @@ class LinearClient(TrackerClient):
         ".heic": "image/heic",
         ".heif": "image/heic",
     }
-    _MARKDOWN_IMAGE_PATTERN = re.compile(r"!\[(?P<title>[^\]]*)\]\((?P<url>https?://[^)\s]+)\)")
+    _MARKDOWN_IMAGE_PATTERN = re.compile(
+        r"!\[(?P<title>[^\]]*)\]\(\s*(?:<)?(?P<url>https?://[^\s>)]+)(?:>)?(?:\s+\"[^\"]*\")?\s*\)"
+    )
+    _ALLOWED_IMAGE_HOSTS = {"files.linear.app", "uploads.linear.app"}
 
     @staticmethod
     def _get_mime_type(path: Path) -> str | None:
@@ -563,6 +567,13 @@ class LinearClient(TrackerClient):
             )
         return out
 
+    @staticmethod
+    def _is_allowed_image_url(url: str) -> bool:
+        """Allow only HTTPS URLs on Linear-owned upload domains."""
+        parsed = urlparse(url)
+        host = (parsed.hostname or "").lower()
+        return parsed.scheme == "https" and host in LinearClient._ALLOWED_IMAGE_HOSTS
+
     async def _download_image(self, url: str, dest_path: Path) -> bool:
         """Download image from Linear and save to dest_path.
 
@@ -574,6 +585,10 @@ class LinearClient(TrackerClient):
             True if download succeeded and content is valid image, False otherwise
         """
         try:
+            if not self._is_allowed_image_url(url):
+                logger.warning("Rejected non-Linear image URL: %s", url)
+                return False
+
             # Use existing httpx client with auth headers
             headers = {"Authorization": self.api_key}
             response = await self._client.get(url, headers=headers, timeout=30)

@@ -8,9 +8,8 @@ Assembles prompts from:
 
 from __future__ import annotations
 
-import asyncio
-import base64
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +24,7 @@ from .tracking import (
 )
 
 log = logging.getLogger(__name__)
+_TITLE_WS_RE = re.compile(r"[\r\n\t]+")
 
 
 def load_prompt_file(path: str, workflow_dir: str | Path) -> str:
@@ -204,6 +204,7 @@ async def build_lifecycle_section(
     recent_comments: list[dict[str, Any]] | None = None,
     previous_error: str | None = None,
     embed_images: bool = True,
+    workspace_path: Path | None = None,
 ) -> str:
     """Render the lifecycle section from an external template.
 
@@ -243,7 +244,7 @@ async def build_lifecycle_section(
 
     # Embed images if requested and present
     if embed_images and recent_comments and context.get("has_images"):
-        image_section = await embed_images_in_prompt(recent_comments)
+        image_section = await embed_images_in_prompt(recent_comments, allowed_root=workspace_path)
         if image_section:
             rendered = rendered + "\n\n" + image_section
 
@@ -266,6 +267,7 @@ async def assemble_prompt(
     last_run_at: str | None = None,
     comments: list[dict[str, Any]] | None = None,
     previous_error: str | None = None,
+    workspace_path: Path | None = None,
 ) -> str:
     """Orchestrate three-layer prompt assembly.
 
@@ -374,33 +376,20 @@ async def assemble_prompt(
         is_rework=is_rework,
         recent_comments=recent,
         previous_error=previous_error,
+        workspace_path=workspace_path,
     )
     parts.append(lifecycle)
 
     return "\n\n".join(parts)
 
 
-def _get_mime_type_from_path(path: Path) -> str:
-    """Determine MIME type from file extension."""
-    ext = path.suffix.lower()
-    mime_types: dict[str, str] = {
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".webp": "image/webp",
-        ".heic": "image/heic",
-        ".heif": "image/heic",
-    }
-    return mime_types.get(ext, "image/png")
-
-
 async def embed_images_in_prompt(
     comments: list[dict[str, Any]],
     max_images_per_comment: int = 5,
     max_total_images: int = 20,
+    allowed_root: Path | None = None,
 ) -> str:
-    """Generate markdown with embedded base64 images from comment attachments.
+    """Generate local-file image references for Claude CLI ingestion.
 
     Args:
         comments: List of comment nodes with 'downloaded_images' key containing
@@ -409,10 +398,11 @@ async def embed_images_in_prompt(
         max_total_images: Maximum total images across all comments.
 
     Returns:
-        Markdown string with embedded base64 images.
+        Markdown string with ``@/absolute/path/to/image`` references.
     """
-    image_markdown: list[str] = []
+    image_lines: list[str] = []
     total_count = 0
+    allowed_root_resolved = allowed_root.resolve() if allowed_root is not None else None
 
     for comment in comments:
         images = comment.get("downloaded_images", [])
@@ -428,27 +418,43 @@ async def embed_images_in_prompt(
             if not img_path_str:
                 continue
 
-            path = Path(img_path_str)
-            if not path.exists():
+            path = Path(img_path_str).expanduser().resolve()
+            if not path.exists() or not path.is_file():
                 log.warning("Image file not found: %s", img_path_str)
                 continue
 
             try:
-                # Read and encode using async thread to avoid blocking
-                data = await asyncio.to_thread(path.read_bytes)
-                mime_type = img_info.get("mime_type") or _get_mime_type_from_path(path)
-                b64 = base64.b64encode(data).decode("ascii")
+                if allowed_root_resolved is not None and not path.is_relative_to(
+                    allowed_root_resolved
+                ):
+                    log.warning(
+                        "Skipping image outside workspace root: %s (root=%s)",
+                        path,
+                        allowed_root_resolved,
+                    )
+                    continue
 
-                title = img_info.get("title", path.name)
-
-                # Add markdown image with data URI
-                image_markdown.append(f"![{title}](data:{mime_type};base64,{b64})")
+                title = _sanitize_image_title(img_info.get("title"), path.name)
+                # Claude CLI resolves @file references and loads images directly.
+                image_lines.append(f"- {title}\n@{path}")
                 total_count += 1
             except Exception as e:
-                log.warning("Failed to embed image %s: %s", img_path_str, e)
+                log.warning("Failed to add image reference %s: %s", img_path_str, e)
                 continue
 
-    return "\n\n".join(image_markdown)
+    if not image_lines:
+        return ""
+    return "\n\n".join(image_lines)
+
+
+def _sanitize_image_title(raw_title: Any, fallback_name: str) -> str:
+    """Normalize image titles for safe prompt display."""
+    title = str(raw_title or "").strip()
+    if not title:
+        title = fallback_name
+    title = _TITLE_WS_RE.sub(" ", title)
+    title = title.replace("@", "(at)")
+    return title
 
 
 def build_image_references(comments: list[dict[str, Any]]) -> list[dict[str, str]]:

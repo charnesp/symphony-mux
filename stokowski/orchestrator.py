@@ -1402,6 +1402,7 @@ class Orchestrator:
                 last_run_at=last_run_at,
                 comments=comments,
                 previous_error=previous_error,
+                workspace_path=workspace_path,
             )
 
         # Legacy fallback
@@ -1450,6 +1451,7 @@ class Orchestrator:
                 attempt=attempt_num or 1,
                 last_run_at=last_run_at,
                 comments=None,
+                workspace_path=None,
             )
 
         # Legacy mode: use workflow prompt_template with Jinja2

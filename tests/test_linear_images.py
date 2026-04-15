@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
+import httpx
 import pytest
 
 from stokowski.linear import LinearClient
@@ -22,11 +23,11 @@ async def test_download_image_success(tmp_path: Path):
 
     mock_response = AsyncMock()
     mock_response.content = png_data
-    mock_response.raise_for_status = AsyncMock()
+    mock_response.raise_for_status = Mock()
 
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_response
-        result = await client._download_image("https://example.com/image.png", dest_path)
+        result = await client._download_image("https://uploads.linear.app/image.png", dest_path)
 
     assert result is True
     assert dest_path.exists()
@@ -44,11 +45,11 @@ async def test_download_image_invalid_content(tmp_path: Path):
 
     mock_response = AsyncMock()
     mock_response.content = fake_data
-    mock_response.raise_for_status = AsyncMock()
+    mock_response.raise_for_status = Mock()
 
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_response
-        result = await client._download_image("https://example.com/file.txt", dest_path)
+        result = await client._download_image("https://uploads.linear.app/file.txt", dest_path)
 
     assert result is False
     assert not dest_path.exists()
@@ -61,11 +62,15 @@ async def test_download_image_http_error(tmp_path: Path):
     dest_path = tmp_path / "test.png"
 
     mock_response = AsyncMock()
-    mock_response.raise_for_status = AsyncMock(side_effect=Exception("HTTP 404"))
+    request = httpx.Request("GET", "https://uploads.linear.app/missing.png")
+    response = httpx.Response(404, request=request)
+    mock_response.raise_for_status = Mock(
+        side_effect=httpx.HTTPStatusError("HTTP 404", request=request, response=response)
+    )
 
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_response
-        result = await client._download_image("https://example.com/missing.png", dest_path)
+        result = await client._download_image("https://uploads.linear.app/missing.png", dest_path)
 
     assert result is False
 
@@ -76,11 +81,9 @@ async def test_download_image_timeout(tmp_path: Path):
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     dest_path = tmp_path / "test.png"
 
-    import httpx
-
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.side_effect = httpx.TimeoutException("Connection timeout")
-        result = await client._download_image("https://example.com/slow.png", dest_path)
+        result = await client._download_image("https://uploads.linear.app/slow.png", dest_path)
 
     assert result is False
 
@@ -91,7 +94,7 @@ async def test_download_comment_images_no_attachments(tmp_path: Path):
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
     comments = [{"id": "c1", "body": "No attachments here", "createdAt": "2026-01-01T00:00:00Z"}]
@@ -108,7 +111,7 @@ async def test_download_comment_images_with_image_attachments(tmp_path: Path):
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
 
@@ -124,7 +127,7 @@ async def test_download_comment_images_with_image_attachments(tmp_path: Path):
                 "nodes": [
                     {
                         "id": "att-1",
-                        "url": "https://files.linear.app/image.png",
+                        "url": "https://uploads.linear.app/assets/image.png",
                         "title": "screenshot.png",
                         "sourceType": "image",
                     }
@@ -135,7 +138,7 @@ async def test_download_comment_images_with_image_attachments(tmp_path: Path):
 
     mock_response = AsyncMock()
     mock_response.content = png_data
-    mock_response.raise_for_status = AsyncMock()
+    mock_response.raise_for_status = Mock()
 
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_response
@@ -145,7 +148,7 @@ async def test_download_comment_images_with_image_attachments(tmp_path: Path):
     assert len(result[0]["downloaded_images"]) == 1
 
     img_info = result[0]["downloaded_images"][0]
-    assert img_info["url"] == "https://files.linear.app/image.png"
+    assert img_info["url"] == "https://uploads.linear.app/assets/image.png"
     assert img_info["title"] == "screenshot.png"
     assert img_info["mime_type"] == "image/png"
     assert Path(img_info["path"]).exists()
@@ -157,7 +160,7 @@ async def test_download_comment_images_skips_non_image_attachments(tmp_path: Pat
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
 
@@ -170,7 +173,7 @@ async def test_download_comment_images_skips_non_image_attachments(tmp_path: Pat
                 "nodes": [
                     {
                         "id": "att-1",
-                        "url": "https://files.linear.app/doc.pdf",
+                        "url": "https://uploads.linear.app/assets/doc.pdf",
                         "title": "document.pdf",
                         "sourceType": "file",  # Not "image"
                     }
@@ -191,14 +194,14 @@ async def test_download_comment_images_caches_existing_files(tmp_path: Path):
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
 
     # Create existing file
     images_dir = tmp_path / "images"
     images_dir.mkdir(parents=True, exist_ok=True)
-    existing_file = images_dir / "MAN-27-c1-screenshot.png"
+    existing_file = images_dir / "TEST-123-c1-screenshot.png"
     existing_file.write_bytes(b"\x89PNG\r\n\x1a\nexisting data")
 
     comments = [
@@ -210,7 +213,7 @@ async def test_download_comment_images_caches_existing_files(tmp_path: Path):
                 "nodes": [
                     {
                         "id": "att-1",
-                        "url": "https://files.linear.app/image.png",
+                        "url": "https://uploads.linear.app/assets/image.png",
                         "title": "screenshot.png",
                         "sourceType": "image",
                     }
@@ -234,7 +237,7 @@ async def test_download_comment_images_respects_limits(tmp_path: Path):
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
 
@@ -242,7 +245,7 @@ async def test_download_comment_images_respects_limits(tmp_path: Path):
     attachments = [
         {
             "id": f"att-{i}",
-            "url": f"https://files.linear.app/image{i}.png",
+            "url": f"https://uploads.linear.app/assets/image{i}.png",
             "title": f"screenshot{i}.png",
             "sourceType": "image",
         }
@@ -261,7 +264,7 @@ async def test_download_comment_images_respects_limits(tmp_path: Path):
     png_data = b"\x89PNG\r\n\x1a\n" + b"fake png data"
     mock_response = AsyncMock()
     mock_response.content = png_data
-    mock_response.raise_for_status = AsyncMock()
+    mock_response.raise_for_status = Mock()
 
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_response
@@ -278,7 +281,7 @@ async def test_download_comment_images_respects_size_limit(tmp_path: Path):
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
 
@@ -294,7 +297,7 @@ async def test_download_comment_images_respects_size_limit(tmp_path: Path):
                 "nodes": [
                     {
                         "id": "att-1",
-                        "url": "https://files.linear.app/huge.png",
+                        "url": "https://uploads.linear.app/assets/huge.png",
                         "title": "huge.png",
                         "sourceType": "image",
                     }
@@ -305,7 +308,7 @@ async def test_download_comment_images_respects_size_limit(tmp_path: Path):
 
     mock_response = AsyncMock()
     mock_response.content = png_data
-    mock_response.raise_for_status = AsyncMock()
+    mock_response.raise_for_status = Mock()
 
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_response
@@ -350,7 +353,7 @@ async def test_download_comment_images_missing_url(tmp_path: Path):
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
 
@@ -380,35 +383,48 @@ async def test_download_comment_images_missing_url(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_download_comment_images_from_markdown_body(tmp_path: Path):
-    """Extract image URLs from markdown body when attachments are unavailable."""
+    """Fallback extraction handles markdown images and ignores plain links."""
     client = LinearClient("https://api.linear.app/graphql", "test-key")
     issue = Issue(
         id="issue-123",
-        identifier="MAN-27",
+        identifier="TEST-123",
         title="Test Issue",
     )
 
     comments = [
         {
             "id": "c1",
-            "body": "Screenshot:\\n![screen](https://files.linear.app/screen.png)",
+            "body": (
+                "Screenshot:\\n"
+                "![screen](https://uploads.linear.app/assets/screen.png)\\n"
+                "Dupe: ![screen-dup](https://uploads.linear.app/assets/screen.png)\\n"
+                "Plain link should be ignored: https://uploads.linear.app/assets/not-an-image-link.png"
+            ),
             "createdAt": "2026-01-01T00:00:00Z",
-        }
+        },
+        {
+            "id": "c2",
+            "body": "No markdown image syntax here",
+            "createdAt": "2026-01-01T00:00:01Z",
+        },
     ]
 
     png_data = b"\x89PNG\r\n\x1a\n" + b"fake png data"
     mock_response = AsyncMock()
     mock_response.content = png_data
-    mock_response.raise_for_status = AsyncMock()
+    mock_response.raise_for_status = Mock()
 
     with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
         mock_get.return_value = mock_response
         result = await client.download_comment_images(comments, issue, tmp_path)
 
-    assert len(result) == 1
+    assert len(result) == 2
     assert len(result[0]["downloaded_images"]) == 1
+    assert result[1]["downloaded_images"] == []
+    assert mock_get.await_count == 1
+    assert mock_get.await_args_list[0].args[0] == "https://uploads.linear.app/assets/screen.png"
     img_info = result[0]["downloaded_images"][0]
-    assert img_info["url"] == "https://files.linear.app/screen.png"
+    assert img_info["url"] == "https://uploads.linear.app/assets/screen.png"
     assert img_info["title"] == "screen"
     assert Path(img_info["path"]).exists()
 
@@ -416,13 +432,39 @@ async def test_download_comment_images_from_markdown_body(tmp_path: Path):
 def test_extract_markdown_image_attachments():
     """Markdown image syntax should be converted into image attachment-like entries."""
     body = (
-        "See image ![A](https://files.linear.app/a.png) and "
-        "![B](https://files.linear.app/b.webp) plus duplicate "
-        "![A2](https://files.linear.app/a.png)"
+        "See image ![A](https://uploads.linear.app/assets/a.png) and "
+        "![B](https://uploads.linear.app/assets/b.webp) plus duplicate "
+        "![A2](https://uploads.linear.app/assets/a.png)"
     )
     out = LinearClient._extract_markdown_image_attachments(body)
     assert [x["url"] for x in out] == [
-        "https://files.linear.app/a.png",
-        "https://files.linear.app/b.webp",
+        "https://uploads.linear.app/assets/a.png",
+        "https://uploads.linear.app/assets/b.webp",
     ]
     assert all(x["sourceType"] == "image" for x in out)
+
+
+@pytest.mark.asyncio
+async def test_download_image_rejects_non_linear_domain(tmp_path: Path):
+    """Only Linear domains are allowed for image downloads."""
+    client = LinearClient("https://api.linear.app/graphql", "test-key")
+    dest_path = tmp_path / "test.png"
+
+    with patch.object(client._client, "get", new_callable=AsyncMock) as mock_get:
+        result = await client._download_image("https://example.com/image.png", dest_path)
+
+    assert result is False
+    mock_get.assert_not_called()
+
+
+def test_extract_markdown_image_attachments_supports_link_title_and_angle_brackets():
+    """Parser handles common markdown variants with angle brackets and title suffix."""
+    body = (
+        "![A](<https://uploads.linear.app/assets/a.png>) "
+        '![B](https://uploads.linear.app/assets/b.webp "Image B")'
+    )
+    out = LinearClient._extract_markdown_image_attachments(body)
+    assert [x["url"] for x in out] == [
+        "https://uploads.linear.app/assets/a.png",
+        "https://uploads.linear.app/assets/b.webp",
+    ]
