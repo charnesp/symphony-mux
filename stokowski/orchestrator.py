@@ -8,7 +8,7 @@ import logging
 import os
 import signal
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +80,11 @@ class Orchestrator:
         self._issue_current_state: dict[str, str] = {}  # issue_id -> internal state name
         self._issue_state_runs: dict[str, int] = {}  # issue_id -> run number for current state
         self._pending_gates: dict[str, str] = {}  # issue_id -> gate state name
+
+        # Per-issue cumulative token tracking (preserved across turns/runs)
+        self._issue_input_tokens: dict[str, int] = {}  # issue_id -> cumulative input tokens
+        self._issue_output_tokens: dict[str, int] = {}  # issue_id -> cumulative output tokens
+        self._issue_total_tokens: dict[str, int] = {}  # issue_id -> cumulative total tokens
 
         # Workflow cache (issue_id -> WorkflowConfig)
         self._issue_workflow_cache: dict[str, WorkflowConfig] = {}
@@ -513,6 +518,11 @@ class Orchestrator:
         self._pending_gates.pop(issue.id, None)
         self._issue_workflow_cache.pop(issue.id, None)
 
+        # Clean up per-issue token tracking
+        self._issue_input_tokens.pop(issue.id, None)
+        self._issue_output_tokens.pop(issue.id, None)
+        self._issue_total_tokens.pop(issue.id, None)
+
         if release_agent_resources:
             self._last_session_ids.pop(issue.id, None)
             self._last_prompt_stage_by_issue.pop(issue.id, None)
@@ -698,6 +708,12 @@ class Orchestrator:
             self._last_session_ids.pop(issue.id, None)
             self._last_prompt_stage_by_issue.pop(issue.id, None)
             self._issue_workflow_cache.pop(issue.id, None)  # Clear workflow cache
+
+            # Clean up per-issue token tracking
+            self._issue_input_tokens.pop(issue.id, None)
+            self._issue_output_tokens.pop(issue.id, None)
+            self._issue_total_tokens.pop(issue.id, None)
+
             self.claimed.discard(issue.id)
             self.completed.add(issue.id)
 
@@ -1643,6 +1659,18 @@ class Orchestrator:
         self.total_input_tokens += attempt.input_tokens
         self.total_output_tokens += attempt.output_tokens
         self.total_tokens += attempt.total_tokens
+
+        # Update per-issue cumulative token tracking
+        self._issue_input_tokens[issue.id] = (
+            self._issue_input_tokens.get(issue.id, 0) + attempt.input_tokens
+        )
+        self._issue_output_tokens[issue.id] = (
+            self._issue_output_tokens.get(issue.id, 0) + attempt.output_tokens
+        )
+        self._issue_total_tokens[issue.id] = (
+            self._issue_total_tokens.get(issue.id, 0) + attempt.total_tokens
+        )
+
         if attempt.started_at:
             elapsed = (datetime.now(UTC) - attempt.started_at).total_seconds()
             self.total_seconds_running += elapsed
@@ -1897,6 +1925,11 @@ class Orchestrator:
                 self.claimed.discard(issue_id)
                 self._issue_workflow_cache.pop(issue_id, None)  # Clear workflow cache
 
+                # Clean up per-issue token tracking
+                self._issue_input_tokens.pop(issue_id, None)
+                self._issue_output_tokens.pop(issue_id, None)
+                self._issue_total_tokens.pop(issue_id, None)
+
             elif state_lower == review_lower:
                 # In review/gate state — stop worker but keep gate tracking
                 task = self._tasks.get(issue_id)
@@ -1916,6 +1949,24 @@ class Orchestrator:
                 self._tasks.pop(issue_id, None)
                 self.claimed.discard(issue_id)
                 self._issue_workflow_cache.pop(issue_id, None)  # Clear workflow cache
+
+    def _get_issue_tokens(self, issue_id: str) -> dict[str, int]:
+        """Get cumulative tokens for an issue, respecting 1-month age limit.
+
+        Returns 0 tokens if the issue's last activity is older than 1 month
+        to prevent stale data from accumulating in memory.
+        """
+        last_completed = self._last_completed_at.get(issue_id)
+        if last_completed:
+            age = datetime.now(UTC) - last_completed
+            if age > timedelta(days=30):
+                return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+
+        return {
+            "input_tokens": self._issue_input_tokens.get(issue_id, 0),
+            "output_tokens": self._issue_output_tokens.get(issue_id, 0),
+            "total_tokens": self._issue_total_tokens.get(issue_id, 0),
+        }
 
     def get_state_snapshot(self) -> dict[str, Any]:
         """Get current runtime state for observability."""
@@ -1938,16 +1989,13 @@ class Orchestrator:
                     "workflow_name": r.workflow_name,
                     "session_id": r.session_id,
                     "turn_count": r.turn_count,
+                    "run": self._issue_state_runs.get(r.issue_id, 1),
                     "status": r.status,
                     "last_event": r.last_event,
                     "last_message": r.last_message,
                     "started_at": r.started_at.isoformat() if r.started_at else None,
                     "last_event_at": (r.last_event_at.isoformat() if r.last_event_at else None),
-                    "tokens": {
-                        "input_tokens": r.input_tokens,
-                        "output_tokens": r.output_tokens,
-                        "total_tokens": r.total_tokens,
-                    },
+                    "tokens": self._get_issue_tokens(r.issue_id),
                     "state_name": r.state_name,
                 }
                 for r in self.running.values()
@@ -1957,7 +2005,9 @@ class Orchestrator:
                     "issue_id": e.issue_id,
                     "issue_identifier": e.identifier,
                     "attempt": e.attempt,
+                    "run": self._issue_state_runs.get(e.issue_id, 1),
                     "error": e.error,
+                    "tokens": self._get_issue_tokens(e.issue_id),
                 }
                 for e in self.retry_attempts.values()
             ],
@@ -1969,6 +2019,7 @@ class Orchestrator:
                     ).identifier,
                     "gate_state": gate_state,
                     "run": self._issue_state_runs.get(issue_id, 1),
+                    "tokens": self._get_issue_tokens(issue_id),
                 }
                 for issue_id, gate_state in self._pending_gates.items()
             ],

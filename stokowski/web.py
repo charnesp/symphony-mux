@@ -590,7 +590,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         issue_identifier: r.issue_identifier,
         status: 'retrying',
         turn_count: r.attempt,
-        tokens: { total_tokens: 0 },
+        run: r.run,
+        tokens: r.tokens || { total_tokens: 0 },
         last_message: r.error || 'waiting to retry...',
         session_id: null,
       })),
@@ -599,7 +600,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         status: 'gate',
         state_name: g.gate_state,
         turn_count: g.run,
-        tokens: { total_tokens: 0 },
+        run: g.run,
+        tokens: g.tokens || { total_tokens: 0 },
         last_message: 'Awaiting human review',
         session_id: null,
       })),
@@ -632,7 +634,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
         </div>
         <div class="agent-meta">
           <div class="agent-tokens">${fmt(r.tokens?.total_tokens || 0)} tok</div>
-          <div class="agent-turns">turn ${r.turn_count || 0}</div>
+          <div class="agent-turns">run ${r.run || r.turn_count || 0}</div>
         </div>
       </div>`;
     }).join('');
