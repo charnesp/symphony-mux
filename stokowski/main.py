@@ -240,6 +240,10 @@ async def run_orchestrator(
     log_agent_output_dir: Path | None = None,
 ):
     orch = Orchestrator(workflow_path, log_agent_output_dir=log_agent_output_dir)
+
+    # Fall back to config file port if CLI port not provided
+    effective_port = port or orch.cfg.server.port
+
     loop = asyncio.get_running_loop()
 
     # Start keyboard handler
@@ -249,7 +253,7 @@ async def run_orchestrator(
     # Optional web server
     _uvicorn_server = None
     _uvicorn_task = None
-    if port is not None:
+    if effective_port is not None:
         try:
             import uvicorn
 
@@ -259,13 +263,13 @@ async def run_orchestrator(
             server_config = uvicorn.Config(
                 app,
                 host="127.0.0.1",
-                port=port,
+                port=effective_port,
                 log_level="warning",
             )
             _uvicorn_server = uvicorn.Server(server_config)
             _uvicorn_server.install_signal_handlers = lambda: None  # type: ignore[attr-defined]
             _uvicorn_task = asyncio.create_task(_uvicorn_server.serve())
-            console.print(f"[green]Web dashboard →[/green] http://127.0.0.1:{port}")
+            console.print(f"[green]Web dashboard →[/green] http://127.0.0.1:{effective_port}")
         except ImportError:
             console.print(
                 "[yellow]Install web extras for dashboard: pip install stokowski[web][/yellow]"
