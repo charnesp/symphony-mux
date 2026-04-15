@@ -150,6 +150,8 @@ Async GraphQL client over httpx. Core queries:
 
 Note: the reconciliation query uses `issues(filter: { id: { in: $ids } })` — not `nodes(ids:)` which doesn't exist in Linear's API.
 
+**Image Attachments:** `COMMENTS_QUERY` includes attachment data. The `download_comment_images()` method filters for `sourceType == "image"` attachments, downloads them to the workspace `images/` directory using the Linear API key for authentication, and validates downloaded files by magic bytes (PNG, JPEG, GIF, WebP, HEIC). Images are cached (skipped if already exist) and size-limited. Returns comments with `downloaded_images` key containing local paths and metadata.
+
 ### models.py
 Three dataclasses:
 - `Issue` — normalized Linear issue. `title` is required even for minimal fetches (use `title=""`).
@@ -237,6 +239,8 @@ Three-layer prompt assembly for state machine workflows. Main entry point is `as
 **`build_lifecycle_section()`** generates the auto-injected lifecycle section appended to every prompt. Includes issue metadata, rework context with review comments, recent activity, available transitions, and completion instructions. Clearly demarcated with HTML comments.
 
 **`assemble_prompt()`** applies session-aware composition rules: global/stage/lifecycle on fresh turns; lifecycle-only on resumed same-stage turns; stage+lifecycle on resumed new-stage turns (global stays omitted on resume).
+
+**Image Support:** When comments include `downloaded_images`, `build_lifecycle_section()` automatically embeds them as base64 data URIs in the lifecycle section via `embed_images_in_prompt()`. Images are converted to markdown syntax `![title](data:mime_type;base64,...)` and appended to the lifecycle output. Limits apply: `max_images_per_comment` (default 5), `max_total_images` (default 20). The Jinja2 context includes `has_images` boolean and `image_references` list for templates that want custom image handling.
 
 ### tracking.py
 State machine tracking via structured Linear comments:

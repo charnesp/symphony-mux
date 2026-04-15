@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -139,6 +140,14 @@ query($issueId: String!, $after: String) {
         id
         body
         createdAt
+        attachments {
+          nodes {
+            id
+            url
+            title
+            sourceType
+          }
+        }
       }
     }
   }
@@ -466,6 +475,233 @@ class LinearClient(TrackerClient):
         except Exception as e:
             logger.error(f"Failed to update state for {issue_id}: {e}")
             return False
+
+    # Image attachment handling
+    _IMAGE_MAGIC_BYTES: dict[bytes, str] = {
+        b"\x89PNG\r\n\x1a\n": "image/png",
+        b"\xff\xd8\xff": "image/jpeg",
+        b"GIF87a": "image/gif",
+        b"GIF89a": "image/gif",
+    }
+
+    _EXTENSION_TO_MIME: dict[str, str] = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".heic": "image/heic",
+        ".heif": "image/heic",
+    }
+
+    @staticmethod
+    def _get_mime_type(path: Path) -> str | None:
+        """Determine MIME type from file extension."""
+        ext = path.suffix.lower()
+        return LinearClient._EXTENSION_TO_MIME.get(ext)
+
+    @staticmethod
+    def _is_webp(data: bytes) -> bool:
+        """Check if data is a WebP image (RIFF....WEBP at offset 8)."""
+        return len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+    @staticmethod
+    def _is_heic(data: bytes) -> bool:
+        """Check if data is a HEIC/HEIF image (ISO Base Media File Format).
+
+        HEIC uses ISO BMFF with 'ftyp' box at offset 4 and brand at offset 8.
+        """
+        if len(data) < 12:
+            return False
+        # ftyp box at offset 4
+        if data[4:8] != b"ftyp":
+            return False
+        # Brand at offset 8
+        brand = data[8:12]
+        return brand in (b"heic", b"heix", b"mif1", b"msf1", b"hevc")
+
+    @staticmethod
+    def _validate_image_content(data: bytes) -> str | None:
+        """Validate image content by magic bytes and return detected MIME type.
+
+        Returns the MIME type if valid image, None otherwise.
+        """
+        # Check magic bytes
+        for magic, mime in LinearClient._IMAGE_MAGIC_BYTES.items():
+            if data.startswith(magic):
+                return mime
+
+        # Check WebP (requires length >= 12 for complete validation)
+        if LinearClient._is_webp(data):
+            return "image/webp"
+
+        # Check HEIC/HEIF (ISO BMFF format)
+        if LinearClient._is_heic(data):
+            return "image/heic"
+
+        return None
+
+    async def _download_image(self, url: str, dest_path: Path) -> bool:
+        """Download image from Linear and save to dest_path.
+
+        Args:
+            url: The image URL from Linear attachment
+            dest_path: Where to save the downloaded image
+
+        Returns:
+            True if download succeeded and content is valid image, False otherwise
+        """
+        try:
+            # Use existing httpx client with auth headers
+            headers = {"Authorization": self.api_key}
+            response = await self._client.get(url, headers=headers, timeout=30)
+            response.raise_for_status()
+
+            data = response.content
+
+            # Validate it's an actual image
+            detected_mime = self._validate_image_content(data)
+            if not detected_mime:
+                logger.warning(
+                    "Downloaded file from %s is not a valid image (magic bytes check failed)",
+                    url,
+                )
+                return False
+
+            # Write to destination
+            dest_path.write_bytes(data)
+            logger.debug(
+                "Downloaded image to %s (%s, %d bytes)", dest_path, detected_mime, len(data)
+            )
+            return True
+
+        except httpx.TimeoutException:
+            logger.warning("Timeout downloading image from %s", url)
+            return False
+        except httpx.HTTPStatusError as e:
+            logger.warning("HTTP error downloading image from %s: %s", url, e.response.status_code)
+            return False
+        except Exception as e:
+            logger.warning("Failed to download image from %s: %s", url, e)
+            return False
+
+    async def download_comment_images(
+        self,
+        comments: list[dict],
+        issue: Issue,
+        workspace_path: Path,
+        max_images_per_comment: int = 5,
+        max_total_images: int = 20,
+        max_image_size_mb: int = 10,
+    ) -> list[dict]:
+        """Download images from comment attachments.
+
+        Filters for sourceType == "image" only. Downloads images to workspace/images/
+        with filenames like {issue_identifier}-{comment_id}-{sanitized_filename}.
+        Skips existing files (cache behavior).
+
+        Args:
+            comments: List of comment nodes from fetch_comments
+            issue: The issue being processed
+            workspace_path: Path to the issue's workspace directory
+            max_images_per_comment: Maximum images to download per comment
+            max_total_images: Maximum total images across all comments
+            max_image_size_mb: Maximum image size in MB to download
+
+        Returns:
+            Comments with added 'downloaded_images' key containing list of dicts
+            with 'path', 'url', 'title', 'mime_type' for each downloaded image.
+        """
+        images_dir = workspace_path / "images"
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        total_count = 0
+        max_size_bytes = max_image_size_mb * 1024 * 1024
+
+        for comment in comments:
+            attachments = comment.get("attachments", {}).get("nodes", [])
+            downloaded = []
+
+            for attachment in attachments[:max_images_per_comment]:
+                if total_count >= max_total_images:
+                    logger.debug("Reached max_total_images limit (%d)", max_total_images)
+                    break
+
+                # Only process image attachments
+                if attachment.get("sourceType") != "image":
+                    continue
+
+                url = attachment.get("url")
+                if not url:
+                    continue
+
+                # Build safe filename
+                comment_id = comment.get("id", "unknown")[:8]
+                filename = attachment.get("title", "image")
+                # Sanitize filename - replace non-alphanumeric with underscore
+                safe_filename = "".join(c if c.isalnum() or c in "._-" else "_" for c in filename)
+                # Handle edge cases: empty or dot-only names
+                safe_filename = safe_filename.strip("._")
+                if not safe_filename:
+                    safe_filename = "image"
+                # Ensure it has a reasonable extension
+                if not Path(safe_filename).suffix:
+                    safe_filename += ".png"
+                dest_name = f"{issue.identifier}-{comment_id}-{safe_filename}"
+                dest_path = images_dir / dest_name
+
+                # Check file size if it exists
+                if dest_path.exists():
+                    file_size = dest_path.stat().st_size
+                    if file_size > max_size_bytes:
+                        logger.warning(
+                            "Cached image %s exceeds size limit (%d > %d bytes), skipping",
+                            dest_path.name,
+                            file_size,
+                            max_size_bytes,
+                        )
+                        continue
+                    # Use cached file
+                    mime_type = self._get_mime_type(dest_path)
+                    downloaded.append(
+                        {
+                            "path": str(dest_path),
+                            "url": url,
+                            "title": filename,
+                            "mime_type": mime_type or "image/png",
+                        }
+                    )
+                    total_count += 1
+                    continue
+
+                # Download new file
+                if await self._download_image(url, dest_path):
+                    # Verify size after download
+                    file_size = dest_path.stat().st_size
+                    if file_size > max_size_bytes:
+                        logger.warning(
+                            "Downloaded image %s exceeds size limit (%d > %d bytes), removing",
+                            dest_path.name,
+                            file_size,
+                            max_size_bytes,
+                        )
+                        dest_path.unlink(missing_ok=True)
+                        continue
+
+                    mime_type = self._get_mime_type(dest_path)
+                    downloaded.append(
+                        {
+                            "path": str(dest_path),
+                            "url": url,
+                            "title": filename,
+                            "mime_type": mime_type or "image/png",
+                        }
+                    )
+                    total_count += 1
+
+            comment["downloaded_images"] = downloaded
+
+        return comments
 
 
 @dataclass

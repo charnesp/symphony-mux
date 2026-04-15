@@ -61,6 +61,9 @@ class Orchestrator:
         self.total_output_tokens: int = 0
         self.total_tokens: int = 0
         self.total_seconds_running: float = 0
+        self._issue_input_tokens: dict[str, int] = {}
+        self._issue_output_tokens: dict[str, int] = {}
+        self._issue_total_tokens: dict[str, int] = {}
 
         # Internal
         self._tracker: TrackerClient | None = None
@@ -68,8 +71,6 @@ class Orchestrator:
         self._retry_timers: dict[str, asyncio.TimerHandle] = {}
         self._child_pids: set[int] = set()  # Track claude subprocess PIDs
         self._last_session_ids: dict[str, str] = {}  # issue_id -> last known session_id
-        # issue_id -> (session_id, stage_name): include stage once on next resumed
-        # render for explicit stage changes only.
         self._last_prompt_stage_by_issue: dict[str, tuple[str, str]] = {}
         self._jinja = Environment(undefined=StrictUndefined, autoescape=select_autoescape())
         self._running = False
@@ -80,11 +81,6 @@ class Orchestrator:
         self._issue_current_state: dict[str, str] = {}  # issue_id -> internal state name
         self._issue_state_runs: dict[str, int] = {}  # issue_id -> run number for current state
         self._pending_gates: dict[str, str] = {}  # issue_id -> gate state name
-
-        # Per-issue cumulative token tracking (preserved across turns/runs)
-        self._issue_input_tokens: dict[str, int] = {}  # issue_id -> cumulative input tokens
-        self._issue_output_tokens: dict[str, int] = {}  # issue_id -> cumulative output tokens
-        self._issue_total_tokens: dict[str, int] = {}  # issue_id -> cumulative total tokens
 
         # Workflow cache (issue_id -> WorkflowConfig)
         self._issue_workflow_cache: dict[str, WorkflowConfig] = {}
@@ -130,8 +126,17 @@ class Orchestrator:
             self._tracker = self.cfg.create_tracker_client()
         return self._tracker
 
-    async def _load_issue_comments(self, client: TrackerClient, issue: Issue) -> list[dict]:
+    async def _load_issue_comments(
+        self, client: TrackerClient, issue: Issue, workspace_path: Path | None = None
+    ) -> list[dict]:
         """Fetch issue comments; warn when history may be truncated.
+
+        For LinearClient, also downloads image attachments to the workspace.
+
+        Args:
+            client: The tracker client to fetch comments from
+            issue: The issue being processed
+            workspace_path: The workspace path for downloading images (optional)
 
         Raises:
             CommentsFetchError: The first page of comments could not be loaded.
@@ -142,7 +147,13 @@ class Orchestrator:
                 "Partial comment history for %s; tracking and workflow resolution may be stale",
                 issue.identifier,
             )
-        return result.nodes
+        comments = result.nodes
+
+        # Download images from attachments for LinearClient
+        if workspace_path and isinstance(client, LinearClient):
+            comments = await client.download_comment_images(comments, issue, workspace_path)
+
+        return comments
 
     async def start(self):
         """Start the orchestration loop."""
@@ -517,8 +528,6 @@ class Orchestrator:
         self._issue_state_runs.pop(issue.id, None)
         self._pending_gates.pop(issue.id, None)
         self._issue_workflow_cache.pop(issue.id, None)
-
-        # Clean up per-issue token tracking
         self._issue_input_tokens.pop(issue.id, None)
         self._issue_output_tokens.pop(issue.id, None)
         self._issue_total_tokens.pop(issue.id, None)
@@ -708,12 +717,9 @@ class Orchestrator:
             self._last_session_ids.pop(issue.id, None)
             self._last_prompt_stage_by_issue.pop(issue.id, None)
             self._issue_workflow_cache.pop(issue.id, None)  # Clear workflow cache
-
-            # Clean up per-issue token tracking
             self._issue_input_tokens.pop(issue.id, None)
             self._issue_output_tokens.pop(issue.id, None)
             self._issue_total_tokens.pop(issue.id, None)
-
             self.claimed.discard(issue.id)
             self.completed.add(issue.id)
 
@@ -724,12 +730,6 @@ class Orchestrator:
         else:
             # Agent state — post state comment, ensure active Linear state, schedule retry
             self._issue_current_state[issue.id] = target_name
-            if target_cfg.session == "inherit":
-                sid = self._last_session_ids.get(issue.id)
-                if sid:
-                    self._last_prompt_stage_by_issue[issue.id] = (sid, target_name)
-            else:
-                self._last_prompt_stage_by_issue.pop(issue.id, None)
             client = self._ensure_tracker_client()
             comment = make_state_comment(
                 state=target_name,
@@ -838,13 +838,6 @@ class Orchestrator:
                 await client.post_comment(issue.id, comment)
 
                 self._issue_current_state[issue.id] = target
-                target_cfg = workflow_states.get(target)
-                if target_cfg and target_cfg.session == "inherit":
-                    sid = self._last_session_ids.get(issue.id)
-                    if sid:
-                        self._last_prompt_stage_by_issue[issue.id] = (sid, target)
-                else:
-                    self._last_prompt_stage_by_issue.pop(issue.id, None)
 
                 active_state = self.cfg.linear_states.active
                 moved = await client.update_issue_state(issue.id, active_state)
@@ -970,13 +963,6 @@ class Orchestrator:
                 await client.post_comment(issue.id, comment)
 
                 self._issue_current_state[issue.id] = rework_to
-                rework_cfg = workflow_states.get(rework_to)
-                if rework_cfg and rework_cfg.session == "inherit":
-                    sid = self._last_session_ids.get(issue.id)
-                    if sid:
-                        self._last_prompt_stage_by_issue[issue.id] = (sid, rework_to)
-                else:
-                    self._last_prompt_stage_by_issue.pop(issue.id, None)
 
                 active_state = self.cfg.linear_states.active
                 moved = await client.update_issue_state(issue.id, active_state)
@@ -1260,6 +1246,7 @@ class Orchestrator:
                 workflow,
                 attempt.previous_error,
                 attempt.session_id,
+                ws.path,
             )
 
             # Build env vars for the agent subprocess from workflow.yaml config
@@ -1350,6 +1337,7 @@ class Orchestrator:
         workflow: WorkflowConfig | None = None,
         previous_error: str | None = None,
         session_id: str | None = None,
+        workspace_path: Path | None = None,
     ) -> str:
         """Render prompt using state machine prompt assembly (async — fetches comments)."""
         # Get workflow if not provided
@@ -1377,12 +1365,12 @@ class Orchestrator:
                 if include_stage_prompt_on_resume:
                     self._last_prompt_stage_by_issue.pop(issue.id, None)
 
-            # Fetch comments for lifecycle context
+            # Fetch comments for lifecycle context (with image downloads if workspace_path provided)
             comments: list[dict] | None = None
             is_rework = False
             try:
                 client = self._ensure_tracker_client()
-                comments = await self._load_issue_comments(client, issue)
+                comments = await self._load_issue_comments(client, issue, workspace_path)
                 tracking = parse_latest_tracking(comments)
                 if (
                     tracking
@@ -1398,7 +1386,7 @@ class Orchestrator:
             except Exception as e:
                 logger.warning(f"Failed to fetch comments for prompt: {e}")
 
-            prompt = assemble_prompt(
+            return await assemble_prompt(
                 cfg=self.cfg,
                 workflow_dir=str(self.workflow_path.parent),
                 issue=issue,
@@ -1415,12 +1403,11 @@ class Orchestrator:
                 comments=comments,
                 previous_error=previous_error,
             )
-            return prompt
 
         # Legacy fallback
-        return self._render_prompt(issue, attempt_num, state_name, workflow)
+        return await self._render_prompt(issue, attempt_num, state_name, workflow)
 
-    def _render_prompt(
+    async def _render_prompt(
         self,
         issue: Issue,
         attempt_num: int | None,
@@ -1450,7 +1437,7 @@ class Orchestrator:
             last_completed = self._last_completed_at.get(issue.id)
             last_run_at = last_completed.isoformat() if last_completed else None
 
-            return assemble_prompt(
+            return await assemble_prompt(
                 cfg=self.cfg,
                 workflow_dir=str(self.workflow_path.parent),
                 issue=issue,
@@ -1460,8 +1447,6 @@ class Orchestrator:
                 workflow_prompts=workflow_prompts,
                 run=run,
                 is_rework=False,
-                is_resumed_session=False,
-                include_stage_prompt_on_resume=False,
                 attempt=attempt_num or 1,
                 last_run_at=last_run_at,
                 comments=None,
@@ -1659,8 +1644,6 @@ class Orchestrator:
         self.total_input_tokens += attempt.input_tokens
         self.total_output_tokens += attempt.output_tokens
         self.total_tokens += attempt.total_tokens
-
-        # Update per-issue cumulative token tracking
         self._issue_input_tokens[issue.id] = (
             self._issue_input_tokens.get(issue.id, 0) + attempt.input_tokens
         )
@@ -1670,7 +1653,6 @@ class Orchestrator:
         self._issue_total_tokens[issue.id] = (
             self._issue_total_tokens.get(issue.id, 0) + attempt.total_tokens
         )
-
         if attempt.started_at:
             elapsed = (datetime.now(UTC) - attempt.started_at).total_seconds()
             self.total_seconds_running += elapsed
@@ -1736,6 +1718,8 @@ class Orchestrator:
 
         self.running.pop(issue.id, None)
         self._tasks.pop(issue.id, None)
+        if attempt.status == "canceled":
+            self._last_prompt_stage_by_issue.pop(issue.id, None)
 
         if attempt.status == "succeeded":
             if workflow_config_error_exit:
@@ -1800,7 +1784,6 @@ class Orchestrator:
                     error=attempt.error,
                 )
         else:
-            self._last_prompt_stage_by_issue.pop(issue.id, None)
             self.claimed.discard(issue.id)
 
     def _schedule_retry(
@@ -1924,8 +1907,6 @@ class Orchestrator:
                 self._tasks.pop(issue_id, None)
                 self.claimed.discard(issue_id)
                 self._issue_workflow_cache.pop(issue_id, None)  # Clear workflow cache
-
-                # Clean up per-issue token tracking
                 self._issue_input_tokens.pop(issue_id, None)
                 self._issue_output_tokens.pop(issue_id, None)
                 self._issue_total_tokens.pop(issue_id, None)
@@ -1951,15 +1932,11 @@ class Orchestrator:
                 self._issue_workflow_cache.pop(issue_id, None)  # Clear workflow cache
 
     def _get_issue_tokens(self, issue_id: str) -> dict[str, int]:
-        """Get cumulative tokens for an issue, respecting 1-month age limit.
-
-        Returns 0 tokens if the issue's last activity is older than 1 month
-        to prevent stale data from accumulating in memory.
-        """
+        """Return per-issue cumulative tokens with a one-month visibility window."""
         last_completed = self._last_completed_at.get(issue_id)
         if last_completed:
-            age = datetime.now(UTC) - last_completed
-            if age > timedelta(days=30):
+            month_ago = datetime.now(UTC) - timedelta(days=31)
+            if last_completed < month_ago:
                 return {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
 
         return {
@@ -1988,8 +1965,8 @@ class Orchestrator:
                     "issue_identifier": r.issue_identifier,
                     "workflow_name": r.workflow_name,
                     "session_id": r.session_id,
-                    "turn_count": r.turn_count,
                     "run": self._issue_state_runs.get(r.issue_id, 1),
+                    "turn_count": r.turn_count,
                     "status": r.status,
                     "last_event": r.last_event,
                     "last_message": r.last_message,
@@ -2005,8 +1982,8 @@ class Orchestrator:
                     "issue_id": e.issue_id,
                     "issue_identifier": e.identifier,
                     "attempt": e.attempt,
-                    "run": self._issue_state_runs.get(e.issue_id, 1),
                     "error": e.error,
+                    "run": self._issue_state_runs.get(e.issue_id, 1),
                     "tokens": self._get_issue_tokens(e.issue_id),
                 }
                 for e in self.retry_attempts.values()

@@ -115,7 +115,7 @@ async def test_render_prompt_async_catches_non_comment_fetch_errors_and_omits_co
     issue = _issue()
     captured: dict[str, object] = {}
 
-    def capture_assemble(*_a, **kw):
+    async def capture_assemble(*_a, **kw):
         captured["comments"] = kw.get("comments")
         return "ok-prompt"
 

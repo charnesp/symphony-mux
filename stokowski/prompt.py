@@ -8,6 +8,8 @@ Assembles prompts from:
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import logging
 from pathlib import Path
 from typing import Any
@@ -128,6 +130,7 @@ def build_lifecycle_context(
     is_rework: bool = False,
     recent_comments: list[dict[str, Any]] | None = None,
     previous_error: str | None = None,
+    include_images: bool = True,
 ) -> dict[str, Any]:
     """Build the extended template context with lifecycle-specific variables.
 
@@ -143,6 +146,7 @@ def build_lifecycle_context(
         is_rework: Whether this is a rework run after gate rejection.
         recent_comments: Non-tracking comments since last run.
         previous_error: Error message from the previous failed attempt.
+        include_images: Whether to include image references in context.
 
     Returns:
         Dict with all lifecycle-specific template variables.
@@ -160,6 +164,13 @@ def build_lifecycle_context(
                 has_gate_transition = True
                 gate_targets.append((trigger, target))
 
+    # Build image references if requested
+    has_images = False
+    image_references: list[dict[str, str]] = []
+    if include_images and recent_comments:
+        has_images = any(c.get("downloaded_images") for c in recent_comments)
+        image_references = build_image_references(recent_comments)
+
     # Add lifecycle-specific variables
     context.update(
         {
@@ -173,13 +184,15 @@ def build_lifecycle_context(
             "agent_gate_default_transition": (
                 (state_cfg.default_transition or "") if state_cfg.type == "agent-gate" else ""
             ),
+            "has_images": has_images,
+            "image_references": image_references,
         }
     )
 
     return context
 
 
-def build_lifecycle_section(
+async def build_lifecycle_section(
     lifecycle_template: str,
     issue: Issue,
     state_name: str,
@@ -190,6 +203,7 @@ def build_lifecycle_section(
     is_rework: bool = False,
     recent_comments: list[dict[str, Any]] | None = None,
     previous_error: str | None = None,
+    embed_images: bool = True,
 ) -> str:
     """Render the lifecycle section from an external template.
 
@@ -207,6 +221,7 @@ def build_lifecycle_section(
         is_rework: Whether this is a rework run after gate rejection.
         recent_comments: Non-tracking comments since last run.
         previous_error: Error message from the previous failed attempt.
+        embed_images: Whether to embed images as base64 in the output.
 
     Returns:
         The rendered lifecycle section as a markdown string.
@@ -222,10 +237,20 @@ def build_lifecycle_section(
         recent_comments=recent_comments,
         previous_error=previous_error,
     )
-    return render_template(lifecycle_template, context)
+
+    # Render the lifecycle template
+    rendered = render_template(lifecycle_template, context)
+
+    # Embed images if requested and present
+    if embed_images and recent_comments and context.get("has_images"):
+        image_section = await embed_images_in_prompt(recent_comments)
+        if image_section:
+            rendered = rendered + "\n\n" + image_section
+
+    return rendered
 
 
-def assemble_prompt(
+async def assemble_prompt(
     cfg: ServiceConfig,
     workflow_dir: str | Path,
     issue: Issue,
@@ -338,7 +363,7 @@ def assemble_prompt(
     # Load lifecycle template (required)
     lifecycle_template = load_prompt_file(prompts.lifecycle_prompt, workflow_dir)
 
-    lifecycle = build_lifecycle_section(
+    lifecycle = await build_lifecycle_section(
         lifecycle_template=lifecycle_template,
         issue=issue,
         state_name=state_name,
@@ -353,3 +378,98 @@ def assemble_prompt(
     parts.append(lifecycle)
 
     return "\n\n".join(parts)
+
+
+def _get_mime_type_from_path(path: Path) -> str:
+    """Determine MIME type from file extension."""
+    ext = path.suffix.lower()
+    mime_types: dict[str, str] = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".heic": "image/heic",
+        ".heif": "image/heic",
+    }
+    return mime_types.get(ext, "image/png")
+
+
+async def embed_images_in_prompt(
+    comments: list[dict[str, Any]],
+    max_images_per_comment: int = 5,
+    max_total_images: int = 20,
+) -> str:
+    """Generate markdown with embedded base64 images from comment attachments.
+
+    Args:
+        comments: List of comment nodes with 'downloaded_images' key containing
+            list of dicts with 'path', 'title', 'mime_type'.
+        max_images_per_comment: Maximum images to embed per comment.
+        max_total_images: Maximum total images across all comments.
+
+    Returns:
+        Markdown string with embedded base64 images.
+    """
+    image_markdown: list[str] = []
+    total_count = 0
+
+    for comment in comments:
+        images = comment.get("downloaded_images", [])
+        if not images:
+            continue
+
+        for img_info in images[:max_images_per_comment]:
+            if total_count >= max_total_images:
+                log.debug("Reached max_total_images limit (%d)", max_total_images)
+                break
+
+            img_path_str = img_info.get("path")
+            if not img_path_str:
+                continue
+
+            path = Path(img_path_str)
+            if not path.exists():
+                log.warning("Image file not found: %s", img_path_str)
+                continue
+
+            try:
+                # Read and encode using async thread to avoid blocking
+                data = await asyncio.to_thread(path.read_bytes)
+                mime_type = img_info.get("mime_type") or _get_mime_type_from_path(path)
+                b64 = base64.b64encode(data).decode("ascii")
+
+                title = img_info.get("title", path.name)
+
+                # Add markdown image with data URI
+                image_markdown.append(f"![{title}](data:{mime_type};base64,{b64})")
+                total_count += 1
+            except Exception as e:
+                log.warning("Failed to embed image %s: %s", img_path_str, e)
+                continue
+
+    return "\n\n".join(image_markdown)
+
+
+def build_image_references(comments: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Build image references for template context.
+
+    Args:
+        comments: List of comment nodes with 'downloaded_images'.
+
+    Returns:
+        List of image reference dicts with 'path', 'title', 'comment_id'.
+    """
+    references: list[dict[str, str]] = []
+    for comment in comments:
+        comment_id = comment.get("id", "")
+        images = comment.get("downloaded_images", [])
+        for img_info in images:
+            references.append(
+                {
+                    "path": img_info.get("path", ""),
+                    "title": img_info.get("title", ""),
+                    "comment_id": comment_id,
+                }
+            )
+    return references
