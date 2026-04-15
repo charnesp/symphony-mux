@@ -80,6 +80,24 @@ Use a **transition key** from the list below (same keys as in **Transitions**). 
 {% endif %}
 - **State:** {{ state_name }}
 - **Run:** {{ run }}
+
+{% if state_name == "investigate" %}
+## 🚫 Stage Contract: `investigate` (Hard Rules)
+
+This stage is **analysis-only**. You are explicitly forbidden from implementing fixes here.
+
+### Forbidden in `investigate`
+- Modifying source files, tests, config, docs, or workflow files
+- Running commands that implement/format/finalize a fix and then reporting it as done
+- Claiming "fix applied", "issue fixed", "tests pass for the fix", or opening/mentioning a PR as completed work
+
+### Required output for `investigate`
+- Focus only on reproduction, evidence, and root-cause analysis
+- In `<stokowski:report>`, `## Files Changed` must be exactly `none` unless explicitly instructed otherwise by a human comment
+- Include `## Approval Required` items that ask for validation before any coding phase
+
+If you violate these rules, your response is invalid for this stage and must be redone as investigation-only.
+{% endif %}
 {% if issue.description %}
 
 ### Description
