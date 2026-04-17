@@ -159,7 +159,6 @@ workflows:
 
       review-findings-route:
         type: agent-gate
-        post_run: false
         prompt: prompts/common/review-findings-route.md
         linear_state: active
         default_transition: needs_human
@@ -266,7 +265,6 @@ workflows:
       # clean → human merge gate. On invalid routing output, default sends to merge-review.
       review-findings-route:
         type: agent-gate
-        post_run: false
         prompt: prompts/common/review-findings-route.md
         linear_state: active
         default_transition: needs_human
