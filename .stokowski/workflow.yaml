@@ -97,6 +97,17 @@ claude:
   turn_timeout_ms: 1200000       # 20 minutes
   stall_timeout_ms: 180000      # 3 minutes
 
+# -----------------------------------------------------------------------------
+# Common prompts — shared defaults for all workflows
+# -----------------------------------------------------------------------------
+#
+# Define default prompt files here to avoid repetition across workflows.
+# Workflows can override any of these values in their own 'prompts:' section.
+# -----------------------------------------------------------------------------
+
+common_prompts:
+  lifecycle_prompt: prompts/lifecycle.md
+  lifecycle_post_run_prompt: prompts/lifecycle-post-run.md
 
 workflows:
 
@@ -105,8 +116,6 @@ workflows:
 
     prompts:
       global_prompt: prompts/debug/global.md
-      lifecycle_prompt: prompts/lifecycle.md
-      lifecycle_post_run_prompt: prompts/lifecycle-post-run.md
 
     # Per-workflow concurrency limits (optional, overrides global agent:)
     max_concurrent_agents: 4
@@ -209,8 +218,6 @@ workflows:
 
     prompts:
       global_prompt: prompts/feature/global.md
-      lifecycle_prompt: prompts/lifecycle.md
-      lifecycle_post_run_prompt: prompts/lifecycle-post-run.md
 
     # Per-workflow concurrency limits
     max_concurrent_agents: 4
