@@ -1,5 +1,9 @@
 You are an experienced, pragmatic software engineering AI agent. Do not over-engineer a solution when a simple one is possible. Keep edits minimal. If you want an exception to ANY rule, you MUST stop and get permission first.
 
+## Pre-commit gate (mandatory before commit or push)
+
+**Never** run `git commit` or `git push` until **`uv run pre-commit run --all-files`** has completed with **exit code 0** on the exact tree you are about to record. **`uv run pytest` (or any single check) is not sufficient** — the repo’s hooks also run `ruff` / `ruff format`, `bandit`, `pip-audit`, `pyright`, YAML/TOML/JSON checks, EOF/trailing-whitespace, and more (see `.pre-commit-config.yaml`). If a hook modifies files (e.g. `ruff-format`), **stage those changes**, re-run pre-commit until everything passes, **then** commit.
+
 # Using Superpowers
 
 **ALWAYS invoke the `using-superpowers` skill before any response or action.**
@@ -108,7 +112,10 @@ stokowski -v --log-agent-output /path/to/logs
 ## Project Maintenance
 
 ```bash
-# Run tests (use test extra: uv sync --extra test)
+# Full quality gate (required before any commit — see "Pre-commit gate" above)
+uv run pre-commit run --all-files
+
+# Run tests only (insufficient alone before commit)
 uv run pytest tests/ -v
 
 # Install with web dependencies
@@ -398,10 +405,10 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 
 ## Validation Before Committing
 
+- **First:** `uv run pre-commit run --all-files` — **all** hooks must pass; do not substitute with pytest-only (see **Pre-commit gate** at the top of this file).
 - Test against a real Linear project with a test ticket
 - Run `uv run stokowski .stokowski/workflow.yaml --dry-run` to validate the operator workflow config used in this repo
 - Verify no breaking changes to state machine protocol
-- Run `uv run pre-commit run --all-files` and ensure **all** hooks pass
 - Validate `commit-msg` explicitly using the real subject you plan to commit (including release commits), e.g. `printf "<planned-subject>\n\n<optional-body>\n" > /tmp/commit-msg.txt && uv run pre-commit run --hook-stage commit-msg commitizen --commit-msg-filename /tmp/commit-msg.txt`
 - **ABSOLUTE RULE:** do not commit, push, or open/update a PR while any pre-commit or commit-msg hook is failing
 
