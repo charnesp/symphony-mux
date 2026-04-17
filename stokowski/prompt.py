@@ -429,9 +429,9 @@ async def assemble_post_run_lifecycle_prompt(
 
     Resolves the markdown path via ``prompts.resolved_lifecycle_post_run_prompt()`` —
     default relative path ``prompts/lifecycle-post-run.md`` next to ``workflow.yaml``.
-
-    Args:
-        workflow_name: YAML workflow key (e.g. ``feature``) for lifecycle Jinja conditionals.
+    Renders it with the same lifecycle Jinja context as the pre-run layer (issue,
+    ``state_name``, transitions, comments slice, ``lifecycle_phase='post'``, etc.), plus
+    ``workflow_name`` (YAML workflow key, e.g. ``feature``) for template conditionals.
     """
     prompts = workflow_prompts if workflow_prompts is not None else cfg.prompts
     post_path = prompts.resolved_lifecycle_post_run_prompt()

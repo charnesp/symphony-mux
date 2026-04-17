@@ -234,7 +234,7 @@ Three-layer prompt assembly for state machine workflows. Main entry point is `as
 
 **`render_template(template_str, context)`** renders a Jinja2 template with `_SilentUndefined` — missing variables render as empty strings instead of raising errors.
 
-**`build_template_context(issue, state_name, run, attempt, last_run_at)`** builds the flat dict used for Jinja2 rendering. Includes: `issue_id`, `issue_identifier`, `issue_title`, `issue_description`, `issue_url`, `issue_priority`, `issue_state`, `issue_branch`, `issue_labels`, `state_name`, `run`, `attempt`, `last_run_at`.
+**`build_template_context(issue, state_name, run, attempt, last_run_at, is_rework)`** builds the dict used for global/stage Jinja2 rendering: `issue` (the `Issue` model), `state_name`, `run`, `attempt`, `last_run_at`, `is_rework`.
 
 **`build_lifecycle_section()`** renders a lifecycle markdown template with Jinja2 (`lifecycle_phase` `pre` or `post`, plus issue / transitions / comments context, and `workflow_name` from the YAML workflow key for conditionals). Used for Layer 3 of `assemble_prompt()` (pre-run) and for `assemble_post_run_lifecycle_prompt()` (post-run only; `embed_images=False` so comment images are not attached on the closure turn).
 
