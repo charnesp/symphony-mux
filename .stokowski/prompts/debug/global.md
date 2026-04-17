@@ -28,12 +28,12 @@ This is a **lightweight workflow** for bugs (no OpenSpec), with review gates:
 
 - **Investigate** → human **fix-review** → **fix** (local bugfix branch) → automated **code-review** → **review-findings-route** (opens PR when ready) → human **merge-review** → **merge** (squash bugfix branch)
 - Faster than the full feature pipeline; still uses adversarial code review before merge
-- Automated tests and **`uv run pre-commit run --all-files`** are expected when the repo uses them
+- Automated tests and local quality checks (`npm audit`, `npm run test`, `npm run lint`) are expected when the repo uses them
 - **No** `openspec/changes/` for debug work
 
 ## Reports to Linear (`<stokowski:report>`)
 
-Stokowski **posts only** the content between `<stokowski:report>` and `</stokowski:report>`. Put summaries, investigation findings, and gate **Approval Required** items **inside** that block (see the lifecycle prompt). Do not paste tool transcripts, NDJSON/stream-json, or line-number-prefixed file dumps into the report — human-readable Markdown only.
+Stokowski **posts only** the content between `<stokowski:report>` and `</stokowski:report>`. Put summaries, investigation findings, and gate **Approval Required** items **inside** that block. The envelope and required sections (including **`## Commit Information`**) are defined under the heading **`## ⚠️ REQUIRED: Structured Work Report`** in the same assembled instructions you receive — find that section by its exact heading (it is not necessarily first; global context may precede it). Do not paste tool transcripts, NDJSON/stream-json, or line-number-prefixed file dumps into the report — human-readable Markdown only.
 
 ## Investigation Summary Format
 

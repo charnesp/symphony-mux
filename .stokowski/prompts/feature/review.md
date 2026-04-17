@@ -16,6 +16,7 @@ Perform this review by following the **`deep-review`** skill (**`/deep-review`**
 
 - Every **P0–P3** finding must be listed there as **open**, **resolved** (fixed), or **accepted with documented rationale** (quote the rationale next to the finding).
 - Acceptances or resolutions stated **only** on Linear (or outside `<stokowski:report>`) **do not count** for **`review-findings-route`** — the following agent-gate reads **only** this report.
+- Include **`## Commit Information`** (Branch, Commit SHA, Repository, MR URL) with real `git` output for the tree you reviewed — **MR URL** may be `N/A` if no MR exists yet (requirements under **`## ⚠️ REQUIRED: Structured Work Report`** — find that heading in your assembled instructions).
 
 ## Mindset
 
@@ -27,10 +28,10 @@ Perform this review by following the **`deep-review`** skill (**`/deep-review`**
 
 ## How to Review
 
-There may be **no PR/MR yet** — implementation and automated review happen before merge-review prep opens one. Base your review on the **linked Linear issue** and the **local diff vs main**:
+There may be **no PR/MR yet** — implementation and automated review happen before merge-review prep opens one. Base your review on the **linked Linear issue** and the **local diff vs master**:
 
 1. Read the issue description and acceptance criteria first
-2. Inspect the full change: e.g. `git fetch origin main && git diff origin/main...HEAD` (or `main...HEAD` per project convention)
+2. Inspect the full change: e.g. `git fetch origin master && git diff origin/master...HEAD` (or `master...HEAD` per project convention)
 3. Put **all** findings and **all** P0–P3 resolutions/acceptances in **`<stokowski:report>`** (see **Authoritative report**). You may also mirror a summary to Linear; this stage is review-only, not PR-line comments unless a PR already exists
 4. Classify every finding with **P0–P4** (see below). **P0, P1, P2, and P3** are merge blockers unless **explicitly accepted with documented rationale in `<stokowski:report>`**.
 5. Approve only if merge criteria below are met — your **`<stokowski:report>`** drives **`review-findings-route`**
@@ -86,18 +87,16 @@ After this automated review, **`review-findings-route`** decides the next step. 
 
 ## Rework run
 
-{% if is_rework %}
-This is a rework run (the review stage is being re-run after changes):
+If this is a rework run (the review stage is being re-run after changes):
 
 1. Read your prior **`code-review`** **`<stokowski:report>`** (authoritative); use Linear comments only as a supplement.
 2. Read the new commits since your last review:
    ```
-   git log --oneline main..HEAD
+   git log --oneline master..HEAD
    ```
 3. Verify that previously raised issues have been addressed.
 4. Check for any new issues introduced by the rework.
 5. Post an updated `## Code Review` comment with your revised assessment.
-{% endif %}
 
 ## Do NOT
 

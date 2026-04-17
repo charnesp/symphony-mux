@@ -3,9 +3,9 @@
 
 ## ⚠️ REQUIRED: Structured Work Report
 
-**When you complete your work, you MUST include a structured work report wrapped in `<stokowski:report>` XML tags. Failure to include this report will result in your response being rejected and retried.**
+**When you complete your work, you MUST include a structured work report wrapped in `<stokowski:report>` XML tags, including the mandatory `## Commit Information` section defined below. Failure to include this report, or a valid `## Commit Information` block, will result in your response being rejected and retried.**
 
-> **⚠️ NO HUMAN IN THE LOOP:** This session operates autonomously. There is no human monitoring or intervening in this conversation,  at the exception of the  Recent Human Activity section. You MUST proceed to the fullest extent of your reasoning and capability without requesting human input, confirmation, or action. Produce your complete analysis and the required report in this single response.
+> **⚠️ NO HUMAN IN THE LOOP:** This session operates autonomously. There is no human monitoring or intervening in this conversation, except for the Recent Human Activity section. You MUST proceed to the fullest extent of your reasoning and capability without requesting human input, confirmation, or action. Produce your complete analysis and the required report in this single response.
 
 {% if previous_error %}
 ### 🔴 Previous Attempt Failed
@@ -19,12 +19,30 @@
 {% endif %}
 **Required format (place at the END of your response):**
 
+### Hard requirement: `## Commit Information`
+
+Every `<stokowski:report>` MUST include a Markdown section whose heading is **exactly** `## Commit Information` (same spelling and level), followed immediately by **these four bullet lines** with **these labels** — do not rename, merge, or omit them:
+
+- `* **Branch:**` — local branch name (`git branch --show-current`). If you also want the remote tree URL, put it **on this line** after the branch name (e.g. `` `topic-branch` — `https://gitlab.com/<group>/<project>/-/tree/<branch>` ``).
+- `* **Commit SHA:**` — full SHA of the commit that contains your work for this turn (`git rev-parse HEAD`). If this stage cannot have a commit (e.g. read-only investigation with no new commit), use `N/A` and one short reason on the same line.
+- `* **Repository:**` — canonical identity of this repo (e.g. `git remote get-url origin`, or `group/project` such as `mantrice/mantrice-frontend`).
+- `* **MR URL:**` — merge request URL if one exists for this branch; otherwise `N/A` and a short reason (e.g. `N/A — MR not created until merge-review prep`).
+
+**Invalid output:** missing `## Commit Information`, fewer than four bullets, placeholder values (`...`, `TBD`, “see above”), or vague MR links. **Before finishing**, run the `git` commands above and paste real results into the report.
+
 ```xml
 <stokowski:report>
 ## Summary
 - What was accomplished
 - Key decisions made
 - Any blockers encountered
+
+## Commit Information
+
+* **Branch:** `your-branch-name` — optional: `https://gitlab.com/<group>/<project>/-/tree/<branch>`
+* **Commit SHA:** `<full-sha-from-git-rev-parse-HEAD>`
+* **Repository:** `<origin-url-or-group/project>`
+* **MR URL:** `<merge-request-url>` or `N/A — <reason>`
 
 ## Technical Details
 [Detailed explanation if needed]
@@ -43,6 +61,13 @@
 <stokowski:report>
 ## Summary
 ...
+
+## Commit Information
+
+* **Branch:** ...
+* **Commit SHA:** ...
+* **Repository:** ...
+* **MR URL:** ...
 
 ## Approval Required
 The following items need explicit approval before proceeding:
@@ -80,24 +105,6 @@ Use a **transition key** from the list below (same keys as in **Transitions**). 
 {% endif %}
 - **State:** {{ state_name }}
 - **Run:** {{ run }}
-
-{% if state_name == "investigate" %}
-## 🚫 Stage Contract: `investigate` (Hard Rules)
-
-This stage is **analysis-only**. You are explicitly forbidden from implementing fixes here.
-
-### Forbidden in `investigate`
-- Modifying source files, tests, config, docs, or workflow files
-- Running commands that implement/format/finalize a fix and then reporting it as done
-- Claiming "fix applied", "issue fixed", "tests pass for the fix", or opening/mentioning a PR as completed work
-
-### Required output for `investigate`
-- Focus only on reproduction, evidence, and root-cause analysis
-- In `<stokowski:report>`, `## Files Changed` must be exactly `none` unless explicitly instructed otherwise by a human comment
-- Include `## Approval Required` items that ask for validation before any coding phase
-
-If you violate these rules, your response is invalid for this stage and must be redone as investigation-only.
-{% endif %}
 {% if issue.description %}
 
 ### Description
@@ -122,10 +129,12 @@ If review comments are present below, they are the **primary source of truth** f
 
 {% endfor %}
 {% endif %}
-Treat every review comment above as required acceptance criteria, then address all of them before resubmitting.
+Address all review comments above before resubmitting. If a comment cannot be applied, explain why and propose an alternative.
 
 {% elif recent_comments %}
-### Recent Human Activity ** ⚠️ CAREFULLY READ THEM ALL ! **
+### Recent Human Activity
+
+**⚠️ Carefully read all comments below.**
 
 {% for comment in recent_comments %}
 > {{ comment.body }}
@@ -142,6 +151,14 @@ Treat every review comment above as required acceptance criteria, then address a
 - `{{ trigger }}` → **{{ target }}**
 {% endfor %}
 
+{% endif %}
+
+{% if state_name == "investigate" %}
+## 🚫 Stage Contract: `investigate` (Hard Rules)
+
+This stage is **analysis-only**. You are explicitly forbidden from implementing fixes or coding here.
+
+If you violate these rules, your response is invalid for this stage and must be redone as investigation-only.
 {% endif %}
 
 <!-- END STOKOWSKI LIFECYCLE -->

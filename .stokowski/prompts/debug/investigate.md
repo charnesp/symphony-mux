@@ -59,6 +59,13 @@ Use this structure (adapt **Technical Details** as needed):
 - What you found (root cause in one line)
 - Key evidence or uncertainty
 
+## Commit Information
+
+* **Branch:** `<git branch --show-current>` — optional tree URL
+* **Commit SHA:** `<git rev-parse HEAD>` or `N/A — no commit yet on this branch` (rare)
+* **Repository:** `<git remote get-url origin or group/project>`
+* **MR URL:** `N/A — investigation stage; no MR`
+
 ## Technical Details
 
 ### Location

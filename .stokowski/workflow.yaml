@@ -63,8 +63,9 @@ hooks:
     echo "Workspace created for test issue"
   before_run: |
     git fetch origin main || exit 1
-    if [ -z "$(git status --porcelain)" ]; then
-      # Pure behind main → fast-forward; diverged (local commits + main moved) → rebase
+    current_branch="$(git branch --show-current)"
+    if [ -z "$(git status --porcelain)" ] && [ "$current_branch" = "main" ]; then
+      # Only auto-sync the main branch to avoid rebasing tracked work branches.
       if git merge-base --is-ancestor HEAD origin/main; then
         git merge --ff-only origin/main || exit 1
       else
@@ -99,12 +100,6 @@ claude:
 
 workflows:
 
-  # ── Workflow: debug ───────────────────────────────────────────────────────
-  # Triggered by the "debug" label on Linear issues.
-  # Bug investigation → human approval → fix → automated code review →
-  # agent-gate routing → optional correct-findings loop → merge-review → merge.
-  # No OpenSpec; bugfix branch fix/<id>-... is merged at the end.
-  # ──────────────────────────────────────────────────────────────────────────
   debug:
     label: debug
 
@@ -112,9 +107,8 @@ workflows:
       global_prompt: prompts/debug/global.md
       lifecycle_prompt: prompts/lifecycle.md
 
-    # NOTE: Per-workflow concurrency keys are currently informational only.
-    # The runtime enforces root `agent.*` limits until workflow-scoped limits are implemented.
-    max_concurrent_agents: 3
+    # Per-workflow concurrency limits (optional, overrides global agent:)
+    max_concurrent_agents: 4
     max_concurrent_agents_by_state:
       investigate: 2
       fix: 1
@@ -164,7 +158,7 @@ workflows:
 
       review-findings-route:
         type: agent-gate
-        prompt: prompts/debug/review-findings-route.md
+        prompt: prompts/common/review-findings-route.md
         linear_state: active
         default_transition: needs_human
         transitions:
@@ -174,7 +168,7 @@ workflows:
 
       correct-findings-code-review:
         type: agent
-        prompt: prompts/debug/correct-findings-code-review.md
+        prompt: prompts/common/correct-findings-code-review.md
         linear_state: active
         model: kimi-k2.5:cloud
         max_turns: 15
@@ -192,7 +186,7 @@ workflows:
 
       merge:
         type: agent
-        prompt: prompts/debug/merge.md
+        prompt: prompts/common/merge.md
         linear_state: active
         max_turns: 5
         session: inherit
@@ -216,9 +210,8 @@ workflows:
       global_prompt: prompts/feature/global.md
       lifecycle_prompt: prompts/lifecycle.md
 
-    # NOTE: Per-workflow concurrency keys are currently informational only.
-    # The runtime enforces root `agent.*` limits until workflow-scoped limits are implemented.
-    max_concurrent_agents: 3
+    # Per-workflow concurrency limits
+    max_concurrent_agents: 4
     max_concurrent_agents_by_state:
       investigate: 2
       implement: 2
@@ -270,7 +263,7 @@ workflows:
       # clean → human merge gate. On invalid routing output, default sends to merge-review.
       review-findings-route:
         type: agent-gate
-        prompt: prompts/feature/review-findings-route.md
+        prompt: prompts/common/review-findings-route.md
         linear_state: active
         default_transition: needs_human
         transitions:
@@ -280,7 +273,7 @@ workflows:
 
       correct-findings-code-review:
         type: agent
-        prompt: prompts/feature/correct-findings-code-review.md
+        prompt: prompts/common/correct-findings-code-review.md
         linear_state: active
         model: kimi-k2.5:cloud
         max_turns: 15
@@ -298,7 +291,7 @@ workflows:
 
       merge:
         type: agent
-        prompt: prompts/feature/merge.md
+        prompt: prompts/common/merge.md
         linear_state: active
         max_turns: 5
         session: inherit

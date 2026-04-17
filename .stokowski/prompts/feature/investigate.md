@@ -17,14 +17,14 @@ Follow the **`openspec-propose`** skill (**`/openspec-propose`**). Do not re-doc
 
 ## Local git (local only — no push / no PR)
 
-Do **not** do investigation or OpenSpec work only on the repo default branch (`main` / `master`). Create a dedicated branch so later stages (`implement`, `review-findings-route`) reuse the same line of history.
+Do **not** do investigation or OpenSpec work only on the repo default branch (`master`). Create a dedicated branch so later stages (`implement`, `review-findings-route`) reuse the same line of history.
 
 **First run**
 
-1. Update the base branch: `git fetch` and `git checkout` the default branch (usually `main`), then `git pull` as appropriate.
+1. Update the base branch: `git fetch` and `git checkout` the default branch (`master`), then `git pull` as appropriate.
 2. Create a work branch: `git checkout -b feature/<short-kebab-description>`. For bugfixes, use `fix/<short-kebab-description>`. You may include the issue identifier in the name (e.g. `feature/man-25-short-topic`). Use the same naming style as **`implement`**: `feature/description` or `fix/description`, kebab-case and descriptive.
 3. Perform **`/openspec-propose`** and any file edits for this stage **on this branch**. Local commits are expected when you add or change files under `openspec/changes/<name>/`.
-4. **Do not** `git push` or open a PR/MR from this stage. Push and PR happen only when **`review-findings-route`** prepares merge-review.
+4. **Do not** `git push` or open a PR/MR from this stage. Push starts in later implementation stages (`implement` / `fix` / `correct-findings-code-review`), while PR/MR creation still happens only when **`review-findings-route`** prepares merge-review. When those stages **first** publish the branch to `origin`, they must use **`git push -u origin <branch>`** if **`origin/<branch>` does not exist yet** (sets `--set-upstream`).
 
 **Rework run:** If a feature or fix branch already exists for this issue, stay on it; do not create a second branch.
 
@@ -56,7 +56,7 @@ Ask yourself:
 
 Stokowski **extracts and posts only** the content between `<stokowski:report>` and `</stokowski:report>`. Anything outside those tags is **not** sent to Linear.
 
-**You must still end your response with the closing `</stokowski:report>` tag** (see the lifecycle prompt). Put the entire investigation—including verbatim `proposal.md` and `design.md`—**inside** that block, using the structure below.
+**You must still end your response with the closing `</stokowski:report>` tag** (envelope and required sections are under the heading **`## ⚠️ REQUIRED: Structured Work Report`** in your assembled instructions — find that heading; it may appear before or after this text). Put the entire investigation—including verbatim `proposal.md` and `design.md`—**inside** that block, using the structure below.
 
 ## OpenSpec artifacts: plain Markdown only (critical)
 
@@ -80,12 +80,19 @@ Stokowski **extracts and posts only** the content between `<stokowski:report>` a
 
 ## Report structure (all inside `<stokowski:report>`)
 
-Use the lifecycle-required sections, then nest the investigation under **Technical Details**:
+Use the report sections required under **`## ⚠️ REQUIRED: Structured Work Report`** (find that heading), then nest the investigation under **Technical Details**:
 
 ```xml
 <stokowski:report>
 ## Summary
-<!-- Short bullets: what you accomplished, key decisions, blockers (lifecycle) -->
+<!-- Short bullets: what you accomplished, key decisions, blockers -->
+
+## Commit Information
+
+* **Branch:** `<git branch --show-current>` — optional tree URL
+* **Commit SHA:** `<git rev-parse HEAD>` (after any local commits for OpenSpec files)
+* **Repository:** `<git remote get-url origin or group/project>`
+* **MR URL:** `N/A — push/MR happen in later stages`
 
 ## Technical Details
 
@@ -120,7 +127,7 @@ Do not substitute links or summaries for these bodies. Optional `####` headers a
 <!-- Paths touched or created, e.g. openspec/changes/<name>/*.md — brief description each -->
 
 ## Approval Required
-<!-- If this state transitions to a gate: numbered items needing human approval (lifecycle) -->
+<!-- If this state transitions to a gate: numbered items needing human approval -->
 </stokowski:report>
 ```
 
