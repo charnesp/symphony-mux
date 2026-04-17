@@ -241,6 +241,12 @@ async def run_orchestrator(
 ):
     orch = Orchestrator(workflow_path, log_agent_output_dir=log_agent_output_dir)
 
+    load_errors = orch._load_workflow()
+    if load_errors:
+        for err in load_errors:
+            console.print(f"[red]{err}[/red]")
+        sys.exit(1)
+
     # Fall back to config file port if CLI port not provided
     effective_port = port or orch.cfg.server.port
 
@@ -320,9 +326,20 @@ async def run_orchestrator(
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 
-def cli():
+def build_arg_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser (exposed for tests)."""
     parser = argparse.ArgumentParser(
-        description="Stokowski - Orchestrate Claude Code agents from Linear issues"
+        description="Stokowski - Orchestrate Claude Code agents from Linear issues",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  %(prog)s .stokowski/workflow.yaml -v --log-agent-output\n"
+            "  %(prog)s -v --log-agent-output -- .stokowski/workflow.yaml\n"
+            "\n"
+            "When using a path after --log-agent-output, it is the log directory, not the "
+            "workflow file. Put the workflow path first, use '=' (e.g. --log-agent-output=DIR), "
+            "or end options with -- before the workflow path (see second example).\n"
+        ),
     )
     parser.add_argument(
         "workflow",
@@ -360,7 +377,11 @@ def cli():
             "Use with -v for a DEBUG preview (first 4000 chars) in the console."
         ),
     )
+    return parser
 
+
+def cli():
+    parser = build_arg_parser()
     args = parser.parse_args()
 
     if args.workflow is None:
