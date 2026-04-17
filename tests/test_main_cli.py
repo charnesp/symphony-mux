@@ -95,7 +95,9 @@ def test_cli_double_dash_workflow_after_log_flag():
     assert args.log_agent_output == ""
 
 
-def test_orchestrator_cfg_unavailable_until_workflow_loaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_orchestrator_cfg_unavailable_until_workflow_loaded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     """Orchestrator.cfg requires _load_workflow(); documents the startup contract."""
     monkeypatch.setenv("LINEAR_API_KEY", "lin_test_dummy_key_for_unit_tests")
 
