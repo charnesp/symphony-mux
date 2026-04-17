@@ -120,6 +120,18 @@ server:
   port: 4200
 
 # -----------------------------------------------------------------------------
+# Common prompts — shared defaults for all workflows
+# -----------------------------------------------------------------------------
+#
+# Define default prompt files here to avoid repetition across workflows.
+# Workflows can override any of these values in their own 'prompts:' section.
+# -----------------------------------------------------------------------------
+
+common_prompts:
+  lifecycle_prompt: prompts/lifecycle.md
+  lifecycle_post_run_prompt: prompts/lifecycle-post-run.md
+
+# -----------------------------------------------------------------------------
 # Workflows — issues are routed based on Linear labels
 # -----------------------------------------------------------------------------
 #
@@ -148,8 +160,7 @@ workflows:
 
     prompts:
       global_prompt: prompts/debug/global.md
-      lifecycle_prompt: prompts/lifecycle.md
-      lifecycle_post_run_prompt: prompts/lifecycle-post-run.md
+      # lifecycle_prompt and lifecycle_post_run_prompt inherited from common_prompts
 
     # Per-workflow concurrency limits (optional, overrides global agent:)
     max_concurrent_agents: 2
@@ -210,8 +221,7 @@ workflows:
 
     prompts:
       global_prompt: prompts/feature/global.md
-      lifecycle_prompt: prompts/lifecycle.md
-      lifecycle_post_run_prompt: prompts/lifecycle-post-run.md
+      # lifecycle_prompt and lifecycle_post_run_prompt inherited from common_prompts
 
     # Per-workflow concurrency limits
     max_concurrent_agents: 4
@@ -323,8 +333,7 @@ workflows:
 
     prompts:
       global_prompt: prompts/docs/global.md
-      lifecycle_prompt: prompts/lifecycle.md
-      lifecycle_post_run_prompt: prompts/lifecycle-post-run.md
+      # lifecycle_prompt and lifecycle_post_run_prompt inherited from common_prompts
 
     max_concurrent_agents: 2
 

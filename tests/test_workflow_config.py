@@ -337,3 +337,198 @@ class TestDuplicateLabelValidation:
         # Empty labels should be skipped, not considered duplicates
         label_errors = [e for e in errors if "label" in e.lower()]
         assert len(label_errors) == 0, f"Empty labels should not produce duplicates: {label_errors}"
+
+
+class TestCommonPrompts:
+    """Tests for common_prompts inheritance across workflows."""
+
+    def test_parse_common_prompts_from_yaml(self, tmp_path):
+        """Should parse common_prompts section from YAML."""
+        yaml_content = """
+tracker:
+  project_slug: test-project
+
+common_prompts:
+  lifecycle_prompt: prompts/common/lifecycle.md
+  lifecycle_post_run_prompt: prompts/common/lifecycle-post-run.md
+
+workflows:
+  debug:
+    label: debug
+    states:
+      reproduce:
+        type: agent
+"""
+        workflow_file = tmp_path / "workflow.yaml"
+        workflow_file.write_text(yaml_content)
+
+        result = parse_workflow_file(workflow_file)
+
+        assert result.config.common_prompts.lifecycle_prompt == "prompts/common/lifecycle.md"
+        assert result.config.common_prompts.lifecycle_post_run_prompt == "prompts/common/lifecycle-post-run.md"
+
+    def test_workflows_inherit_from_common_prompts(self, tmp_path):
+        """Workflows should inherit unspecified prompts from common_prompts."""
+        yaml_content = """
+tracker:
+  project_slug: test-project
+
+common_prompts:
+  lifecycle_prompt: prompts/common/lifecycle.md
+  lifecycle_post_run_prompt: prompts/common/lifecycle-post-run.md
+
+workflows:
+  debug:
+    label: debug
+    states:
+      reproduce:
+        type: agent
+    prompts:
+      global_prompt: prompts/debug/global.md
+"""
+        workflow_file = tmp_path / "workflow.yaml"
+        workflow_file.write_text(yaml_content)
+
+        result = parse_workflow_file(workflow_file)
+        debug_wf = result.config.workflows["debug"]
+
+        # global_prompt is explicitly set
+        assert debug_wf.prompts.global_prompt == "prompts/debug/global.md"
+        # lifecycle_prompt is inherited from common_prompts
+        assert debug_wf.prompts.lifecycle_prompt == "prompts/common/lifecycle.md"
+        # lifecycle_post_run_prompt is inherited from common_prompts
+        assert debug_wf.prompts.lifecycle_post_run_prompt == "prompts/common/lifecycle-post-run.md"
+
+    def test_workflow_prompts_override_common_prompts(self, tmp_path):
+        """Workflow-specific prompts should override common_prompts."""
+        yaml_content = """
+tracker:
+  project_slug: test-project
+
+common_prompts:
+  global_prompt: prompts/common/global.md
+  lifecycle_prompt: prompts/common/lifecycle.md
+  lifecycle_post_run_prompt: prompts/common/lifecycle-post-run.md
+
+workflows:
+  debug:
+    label: debug
+    states:
+      reproduce:
+        type: agent
+    prompts:
+      global_prompt: prompts/debug/global.md
+      lifecycle_prompt: prompts/debug/lifecycle.md
+"""
+        workflow_file = tmp_path / "workflow.yaml"
+        workflow_file.write_text(yaml_content)
+
+        result = parse_workflow_file(workflow_file)
+        debug_wf = result.config.workflows["debug"]
+
+        # All prompts overridden
+        assert debug_wf.prompts.global_prompt == "prompts/debug/global.md"
+        assert debug_wf.prompts.lifecycle_prompt == "prompts/debug/lifecycle.md"
+        # lifecycle_post_run_prompt still inherited
+        assert debug_wf.prompts.lifecycle_post_run_prompt == "prompts/common/lifecycle-post-run.md"
+
+    def test_no_common_prompts_backwards_compatible(self, tmp_path):
+        """Configs without common_prompts should continue to work."""
+        yaml_content = """
+tracker:
+  project_slug: test-project
+
+workflows:
+  debug:
+    label: debug
+    states:
+      reproduce:
+        type: agent
+    prompts:
+      global_prompt: prompts/debug/global.md
+      lifecycle_prompt: prompts/debug/lifecycle.md
+      lifecycle_post_run_prompt: prompts/debug/lifecycle-post-run.md
+"""
+        workflow_file = tmp_path / "workflow.yaml"
+        workflow_file.write_text(yaml_content)
+
+        result = parse_workflow_file(workflow_file)
+        debug_wf = result.config.workflows["debug"]
+
+        # Should use workflow-specific prompts
+        assert debug_wf.prompts.global_prompt == "prompts/debug/global.md"
+        assert debug_wf.prompts.lifecycle_prompt == "prompts/debug/lifecycle.md"
+        assert debug_wf.prompts.lifecycle_post_run_prompt == "prompts/debug/lifecycle-post-run.md"
+
+    def test_common_prompts_only_no_workflow_prompts(self, tmp_path):
+        """Workflows can rely entirely on common_prompts."""
+        yaml_content = """
+tracker:
+  project_slug: test-project
+
+common_prompts:
+  lifecycle_prompt: prompts/common/lifecycle.md
+  lifecycle_post_run_prompt: prompts/common/lifecycle-post-run.md
+
+workflows:
+  debug:
+    label: debug
+    states:
+      reproduce:
+        type: agent
+    # No prompts section at all
+"""
+        workflow_file = tmp_path / "workflow.yaml"
+        workflow_file.write_text(yaml_content)
+
+        result = parse_workflow_file(workflow_file)
+        debug_wf = result.config.workflows["debug"]
+
+        # All prompts inherited from common_prompts
+        assert debug_wf.prompts.global_prompt is None
+        assert debug_wf.prompts.lifecycle_prompt == "prompts/common/lifecycle.md"
+        assert debug_wf.prompts.lifecycle_post_run_prompt == "prompts/common/lifecycle-post-run.md"
+
+    def test_merge_with_defaults_method(self):
+        """Test PromptsConfig.merge_with_defaults directly."""
+        defaults = PromptsConfig(
+            global_prompt="default/global.md",
+            lifecycle_prompt="default/lifecycle.md",
+            lifecycle_post_run_prompt="default/post.md",
+        )
+
+        # Override global_prompt only
+        explicit = PromptsConfig(
+            global_prompt="custom/global.md",
+            lifecycle_prompt="prompts/lifecycle.md",  # Default value
+            lifecycle_post_run_prompt=None,
+        )
+        result = explicit.merge_with_defaults(defaults)
+
+        assert result.global_prompt == "custom/global.md"
+        assert result.lifecycle_prompt == "default/lifecycle.md"
+        assert result.lifecycle_post_run_prompt == "default/post.md"
+
+    def test_empty_common_prompts_valid(self, tmp_path):
+        """Empty common_prompts section should be valid."""
+        yaml_content = """
+tracker:
+  project_slug: test-project
+
+common_prompts:
+
+workflows:
+  debug:
+    label: debug
+    states:
+      reproduce:
+        type: agent
+"""
+        workflow_file = tmp_path / "workflow.yaml"
+        workflow_file.write_text(yaml_content)
+
+        result = parse_workflow_file(workflow_file)
+
+        # Should parse without error, using defaults
+        assert result.config.common_prompts.lifecycle_prompt == "prompts/lifecycle.md"
+        assert result.config.workflows["debug"].prompts.lifecycle_prompt == "prompts/lifecycle.md"

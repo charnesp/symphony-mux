@@ -133,8 +133,8 @@ Ensure:
 
 ## Verification Checklist
 
-- [ ] `common_prompts` section can be parsed from YAML
-- [ ] Workflows inherit unspecified prompts from `common_prompts`
-- [ ] Workflow-specific prompts override `common_prompts` values
-- [ ] Existing configs without `common_prompts` continue to work
-- [ ] All tests pass
+- [x] `common_prompts` section can be parsed from YAML
+- [x] Workflows inherit unspecified prompts from `common_prompts`
+- [x] Workflow-specific prompts override `common_prompts` values
+- [x] Existing configs without `common_prompts` continue to work
+- [x] All tests pass

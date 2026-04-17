@@ -121,6 +121,14 @@ class PromptsConfig:
         """Path to the post-run lifecycle template relative to workflow.yaml."""
         return self.lifecycle_post_run_prompt or "prompts/lifecycle-post-run.md"
 
+    def merge_with_defaults(self, defaults: PromptsConfig) -> PromptsConfig:
+        """Return new PromptsConfig with values from self overriding defaults."""
+        return PromptsConfig(
+            global_prompt=self.global_prompt if self.global_prompt is not None else defaults.global_prompt,
+            lifecycle_prompt=self.lifecycle_prompt if self.lifecycle_prompt != "prompts/lifecycle.md" or defaults.lifecycle_prompt == "prompts/lifecycle.md" else defaults.lifecycle_prompt,
+            lifecycle_post_run_prompt=self.lifecycle_post_run_prompt if self.lifecycle_post_run_prompt is not None else defaults.lifecycle_post_run_prompt,
+        )
+
 
 @dataclass
 class WorkflowConfig:
@@ -182,6 +190,7 @@ class ServiceConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
     server: ServerConfig = field(default_factory=ServerConfig)
     linear_states: LinearStatesConfig = field(default_factory=LinearStatesConfig)
+    common_prompts: PromptsConfig = field(default_factory=PromptsConfig)
     prompts: PromptsConfig = field(default_factory=PromptsConfig)
     states: dict[str, StateConfig] = field(default_factory=lambda: {})
     workflows: dict[str, WorkflowConfig] = field(default_factory=lambda: {})
@@ -580,6 +589,14 @@ def parse_workflow_file(path: str | Path) -> WorkflowDefinition:
         lifecycle_post_run_prompt=pr_raw.get("lifecycle_post_run_prompt"),
     )
 
+    # Parse common_prompts (defaults for all workflows)
+    cp_raw: dict[str, Any] = config_raw.get("common_prompts", {}) or {}  # type: ignore[assignment]
+    common_prompts = PromptsConfig(
+        global_prompt=cp_raw.get("global_prompt"),
+        lifecycle_prompt=str(cp_raw.get("lifecycle_prompt", "prompts/lifecycle.md")),
+        lifecycle_post_run_prompt=cp_raw.get("lifecycle_post_run_prompt"),
+    )
+
     # Parse states
     states_raw: dict[str, Any] = config_raw.get("states", {}) or {}  # type: ignore[assignment]
     states: dict[str, StateConfig] = {}
@@ -599,13 +616,15 @@ def parse_workflow_file(path: str | Path) -> WorkflowDefinition:
                 wf_states[state_name] = _parse_state_config(state_name, sd)
 
             wf_prompts_raw: dict[str, Any] = wf_data.get("prompts", {}) or {}  # type: ignore[assignment]
-            wf_prompts = PromptsConfig(
+            wf_prompts_explicit = PromptsConfig(
                 global_prompt=wf_prompts_raw.get("global_prompt"),
                 lifecycle_prompt=str(
                     wf_prompts_raw.get("lifecycle_prompt", "prompts/lifecycle.md")
                 ),
                 lifecycle_post_run_prompt=wf_prompts_raw.get("lifecycle_post_run_prompt"),
             )
+            # Merge with common_prompts - workflow takes precedence
+            wf_prompts = wf_prompts_explicit.merge_with_defaults(common_prompts)
 
             workflows[wf_name] = WorkflowConfig(
                 name=wf_name,
@@ -624,6 +643,7 @@ def parse_workflow_file(path: str | Path) -> WorkflowDefinition:
         agent=agent,
         server=server,
         linear_states=linear_states,
+        common_prompts=common_prompts,
         prompts=prompts,
         states=states,
         workflows=workflows,
