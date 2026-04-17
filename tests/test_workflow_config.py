@@ -365,7 +365,10 @@ workflows:
         result = parse_workflow_file(workflow_file)
 
         assert result.config.common_prompts.lifecycle_prompt == "prompts/common/lifecycle.md"
-        assert result.config.common_prompts.lifecycle_post_run_prompt == "prompts/common/lifecycle-post-run.md"
+        assert (
+            result.config.common_prompts.lifecycle_post_run_prompt
+            == "prompts/common/lifecycle-post-run.md"
+        )
 
     def test_workflows_inherit_from_common_prompts(self, tmp_path):
         """Workflows should inherit unspecified prompts from common_prompts."""

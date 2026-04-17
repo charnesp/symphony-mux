@@ -124,9 +124,16 @@ class PromptsConfig:
     def merge_with_defaults(self, defaults: PromptsConfig) -> PromptsConfig:
         """Return new PromptsConfig with values from self overriding defaults."""
         return PromptsConfig(
-            global_prompt=self.global_prompt if self.global_prompt is not None else defaults.global_prompt,
-            lifecycle_prompt=self.lifecycle_prompt if self.lifecycle_prompt != "prompts/lifecycle.md" or defaults.lifecycle_prompt == "prompts/lifecycle.md" else defaults.lifecycle_prompt,
-            lifecycle_post_run_prompt=self.lifecycle_post_run_prompt if self.lifecycle_post_run_prompt is not None else defaults.lifecycle_post_run_prompt,
+            global_prompt=self.global_prompt
+            if self.global_prompt is not None
+            else defaults.global_prompt,
+            lifecycle_prompt=self.lifecycle_prompt
+            if self.lifecycle_prompt != "prompts/lifecycle.md"
+            or defaults.lifecycle_prompt == "prompts/lifecycle.md"
+            else defaults.lifecycle_prompt,
+            lifecycle_post_run_prompt=self.lifecycle_post_run_prompt
+            if self.lifecycle_post_run_prompt is not None
+            else defaults.lifecycle_post_run_prompt,
         )
 
 
